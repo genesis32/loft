@@ -69,9 +69,10 @@ func bucketPutBytes(request BucketPutBytesRequest) (*BucketPutBytesResponse, err
 	return nil, nil
 }
 
-func startClient() {
+func startClient(destinationIPAndPort string) {
 	var err error
 	var conn net.Conn
+	fmt.Println("foo",destinationIPAndPort);
 	if runtimeConfig.SslEnabled {
 		rootCert, err := ioutil.ReadFile("../loftserver/server.pem")
 		if err != nil {
@@ -84,9 +85,9 @@ func startClient() {
 		}
 		config := &tls.Config{RootCAs: roots}
 
-		conn, err = tls.Dial("tcp", "localhost:8089", config)
+		conn, err = tls.Dial("tcp", destinationIPAndPort, config)
 	} else {
-		conn, err = net.Dial("tcp", "localhost:8089")
+		conn, err = net.Dial("tcp", destinationIPAndPort)
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -155,6 +156,7 @@ func main() {
 	}
 
 	flag.Bool("server", false, "start the server")
+	flag.String("dst", "localhost:8089", "[client mode] destination ip and port")
 
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
@@ -163,5 +165,8 @@ func main() {
 	isServer := viper.GetBool("server")
 	if isServer {
 		startServer()
+	} else {
+		dst := viper.GetString("dst")
+		startClient(dst)
 	}
 }

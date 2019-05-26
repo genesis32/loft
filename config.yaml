@@ -1,4 +1,4 @@
 listenPort: ":8089"
-sslEnabled: true
+sslEnabled: false
 serverKeyPath: "server.key"
 serverCertPath: "server.pem"
