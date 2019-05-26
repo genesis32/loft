@@ -1,0 +1,4 @@
+listenPort: ":8089"
+sslEnabled: true
+serverKeyPath: "server.key"
+serverCertPath: "server.pem"
