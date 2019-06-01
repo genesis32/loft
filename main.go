@@ -1,15 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net"
-	"os"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -33,36 +34,55 @@ type configuration struct {
 	ListenPort     string
 }
 
+const (
+	bucketGenerateRequestType = 1000
+)
+
+type Header struct {
+	MessageType int32
+	Version     int32
+}
+
 // BucketGenerateRequest Generate the bucket with a 0 sized file
 type BucketGenerateRequest struct {
-	Version          int32
+	Header
 	NumBytesInBucket int64
 }
 
 // BucketGenerateResponse The response to bucket geneation
 type BucketGenerateResponse struct {
-	Version          int32
+	Header
 	ErrorCode        int32
 	UniqueIdentifier string
 }
 
 // BucketPutBytesRequest Put the users bytes in the bucket
 type BucketPutBytesRequest struct {
-	Version          int32
+	Header
 	UniqueIdentifier string
 }
 
 // BucketPutBytesResponse  lbha
 type BucketPutBytesResponse struct {
-	Version   int32
+	Header
 	ErrorCode int32
 }
 
+const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+func generateBucketName(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
 // TODO: wrap these functions in the binary protocol parser
-func bucketGenerate(request BucketGenerateRequest) (*BucketPutBytesRequest, error) {
-	// generate a 0 byte file on the filesystem of the size of request.NumBytesInBucket
-	// generate a 6 character long unique identifier [A-Za-z0-9]
-	return nil, nil
+func bucketGenerate(request BucketGenerateRequest, connectionByteBuffer *bytes.Buffer) (BucketGenerateResponse, error) {
+	bucketName := generateBucketName(6)
+	bucketGenerateResponse := BucketGenerateResponse{UniqueIdentifier: bucketName, ErrorCode: 0}
+	return bucketGenerateResponse, nil
 }
 
 func bucketPutBytes(request BucketPutBytesRequest) (*BucketPutBytesResponse, error) {
@@ -72,7 +92,7 @@ func bucketPutBytes(request BucketPutBytesRequest) (*BucketPutBytesResponse, err
 func startClient(destinationIPAndPort string) {
 	var err error
 	var conn net.Conn
-	fmt.Println("foo",destinationIPAndPort);
+	fmt.Println("foo", destinationIPAndPort)
 	if runtimeConfig.SslEnabled {
 		rootCert, err := ioutil.ReadFile("../loftserver/server.pem")
 		if err != nil {
@@ -93,8 +113,75 @@ func startClient(destinationIPAndPort string) {
 		log.Fatal(err)
 	}
 
-	io.WriteString(conn, "Hello simple secure Server")
+	connectionByteBuffer := new(bytes.Buffer)
+	header := Header{MessageType: bucketGenerateRequestType, Version: 1}
+	err = binary.Write(connectionByteBuffer, binary.BigEndian, header.MessageType)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = binary.Write(connectionByteBuffer, binary.BigEndian, header.Version)
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = conn.Write(connectionByteBuffer.Next(8))
+
+	readBuffer := make([]byte, 1024)
+	_, err = conn.Read(readBuffer)
+	if err != nil {
+		log.Fatal(err)
+	}
+	println("result: " + string(readBuffer))
 	conn.Close()
+}
+
+const (
+	requestPending = iota
+	dataPending
+	dataComplete
+)
+
+func handleServerRequest(c net.Conn) {
+	connectionByteBuffer := bytes.Buffer{}
+	for {
+		log.Print("incoming connection")
+		readBuffer := make([]byte, 1024)
+		bytesRead, err := c.Read(readBuffer)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("bytes read: %d", bytesRead)
+		_, err = connectionByteBuffer.Write(readBuffer)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if connectionByteBuffer.Len() >= 8 {
+			header := Header{}
+			err = binary.Read(&connectionByteBuffer, binary.BigEndian, &header.MessageType)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Printf("message type: %d", header.MessageType)
+			err = binary.Read(&connectionByteBuffer, binary.BigEndian, &header.Version)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if header.MessageType == bucketGenerateRequestType {
+				bucketGenerateRequest := BucketGenerateRequest{Header: header}
+				err = binary.Read(&connectionByteBuffer, binary.BigEndian, &bucketGenerateRequest.NumBytesInBucket)
+				if err != nil {
+					log.Fatal(err)
+				}
+				bucketGenerateResponse, err := bucketGenerate(bucketGenerateRequest, &connectionByteBuffer)
+				if err != nil {
+					log.Fatal(err)
+				}
+				r := []byte(bucketGenerateResponse.UniqueIdentifier)
+				c.Write(r)
+				break
+			}
+		}
+	}
+	c.Close()
 }
 
 func startServer() {
@@ -135,11 +222,8 @@ func startServer() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		go func(c net.Conn) {
-			io.Copy(os.Stdout, c)
-			fmt.Println()
-			c.Close()
-		}(conn)
+		// TODO: Set read timeout
+		go handleServerRequest(conn)
 	}
 }
 
