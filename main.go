@@ -184,8 +184,9 @@ func startClient(destinationIPAndPort string) {
 		log.Fatal(err)
 	}
 
+	bufferReader := bufio.NewReader(conn)
+	buff := make([]byte, 256)
 	for {
-		readBuffer := make([]byte, 1024)
 		bucketGenerateRequest := BucketGenerateRequest{Header: Header{MessageType: bucketGenerateMessageType, Version: 1}, NumBytesInBucket: 24}
 		connectionByteBuffer, err := serializeMessage(bucketGenerateRequest)
 		if err != nil {
@@ -194,15 +195,13 @@ func startClient(destinationIPAndPort string) {
 		conn.Write([]byte{byte(connectionByteBuffer.Len())})
 		_, err = conn.Write(connectionByteBuffer.Next(connectionByteBuffer.Len()))
 
-		_, err = conn.Read(readBuffer)
+		_, err = io.ReadFull(bufferReader, buff[:bucketNameLength])
 		if err != nil {
 			log.Fatal(err)
 		}
-		uniqueIdentifier := string(readBuffer)
-
 		var arr [bucketNameLength]byte
-		copy(arr[:], uniqueIdentifier[:bucketNameLength])
-		log.Printf("generate result: %+v", arr[:])
+		copy(arr[:], buff[:bucketNameLength])
+		log.Printf("generate result: %+v string: %s", arr[:], string(buff[:bucketNameLength]))
 
 		bucketPutRequest := BucketPutBytesRequest{Header: Header{MessageType: bucketPutBytesMessageType, Version: 1}, UniqueIdentifier: arr}
 		connectionByteBuffer, err = serializeMessage(bucketPutRequest)
@@ -212,11 +211,11 @@ func startClient(destinationIPAndPort string) {
 		conn.Write([]byte{byte(connectionByteBuffer.Len())})
 		_, err = conn.Write(connectionByteBuffer.Next(connectionByteBuffer.Len()))
 
-		_, err = conn.Read(readBuffer)
+		_, err = io.ReadFull(bufferReader, buff[:2])
 		if err != nil {
 			log.Fatal(err)
 		}
-		println("put result: " + string(readBuffer))
+		log.Printf("put result: %+v", string(buff[:2]))
 
 		time.Sleep(1000 * time.Millisecond)
 	}
