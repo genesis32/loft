@@ -1,16 +1,20 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
 	"net"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -34,8 +38,11 @@ type configuration struct {
 	ListenPort     string
 }
 
+const bucketNameLength = 6
+
 const (
-	bucketGenerateRequestType = 1000
+	bucketGenerateMessageType = 1000
+	bucketPutBytesMessageType = 1001
 )
 
 type Header struct {
@@ -59,7 +66,7 @@ type BucketGenerateResponse struct {
 // BucketPutBytesRequest Put the users bytes in the bucket
 type BucketPutBytesRequest struct {
 	Header
-	UniqueIdentifier string
+	UniqueIdentifier [bucketNameLength]byte
 }
 
 // BucketPutBytesResponse  lbha
@@ -79,14 +86,78 @@ func generateBucketName(n int) string {
 }
 
 // TODO: wrap these functions in the binary protocol parser
-func bucketGenerate(request BucketGenerateRequest, connectionByteBuffer *bytes.Buffer) (BucketGenerateResponse, error) {
-	bucketName := generateBucketName(6)
+func bucketGenerate(request BucketGenerateRequest) (BucketGenerateResponse, error) {
+	bucketName := generateBucketName(bucketNameLength)
 	bucketGenerateResponse := BucketGenerateResponse{UniqueIdentifier: bucketName, ErrorCode: 0}
 	return bucketGenerateResponse, nil
 }
 
 func bucketPutBytes(request BucketPutBytesRequest) (*BucketPutBytesResponse, error) {
 	return nil, nil
+}
+
+func serializeMessage(message interface{}) (*bytes.Buffer, error) {
+	var err error
+	byteBuffer := new(bytes.Buffer)
+	switch v := message.(type) {
+	case BucketGenerateRequest:
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.MessageType); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.Version); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.NumBytesInBucket); err != nil {
+			return nil, err
+		}
+		return byteBuffer, nil
+	case BucketPutBytesRequest:
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.MessageType); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.Version); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.UniqueIdentifier); err != nil {
+			return nil, err
+		}
+		return byteBuffer, nil
+	}
+	return nil, errors.New("unmapped type to serialize")
+}
+
+func deserializeMessage(messageBytes *bytes.Buffer) (interface{}, error) {
+	var err error
+
+	header := Header{}
+	err = binary.Read(messageBytes, binary.BigEndian, &header.MessageType)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("message type: %d", header.MessageType)
+	err = binary.Read(messageBytes, binary.BigEndian, &header.Version)
+	if err != nil {
+		return nil, err
+	}
+
+	switch header.MessageType {
+	case bucketGenerateMessageType:
+		ret := BucketGenerateRequest{Header: header}
+		err = binary.Read(messageBytes, binary.BigEndian, &ret.NumBytesInBucket)
+		if err != nil {
+			return nil, err
+		}
+		return ret, nil
+	case bucketPutBytesMessageType:
+		ret := BucketPutBytesRequest{Header: header}
+		err = binary.Read(messageBytes, binary.BigEndian, &ret.UniqueIdentifier)
+		if err != nil {
+			return nil, err
+		}
+		return ret, nil
+
+	}
+	return nil, errors.New("unmapped message type")
 }
 
 func startClient(destinationIPAndPort string) {
@@ -113,72 +184,82 @@ func startClient(destinationIPAndPort string) {
 		log.Fatal(err)
 	}
 
-	connectionByteBuffer := new(bytes.Buffer)
-	header := Header{MessageType: bucketGenerateRequestType, Version: 1}
-	err = binary.Write(connectionByteBuffer, binary.BigEndian, header.MessageType)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = binary.Write(connectionByteBuffer, binary.BigEndian, header.Version)
-	if err != nil {
-		log.Fatal(err)
-	}
-	_, err = conn.Write(connectionByteBuffer.Next(8))
+	for {
+		readBuffer := make([]byte, 1024)
+		bucketGenerateRequest := BucketGenerateRequest{Header: Header{MessageType: bucketGenerateMessageType, Version: 1}, NumBytesInBucket: 24}
+		connectionByteBuffer, err := serializeMessage(bucketGenerateRequest)
+		if err != nil {
+			log.Fatal(err)
+		}
+		conn.Write([]byte{byte(connectionByteBuffer.Len())})
+		_, err = conn.Write(connectionByteBuffer.Next(connectionByteBuffer.Len()))
 
-	readBuffer := make([]byte, 1024)
-	_, err = conn.Read(readBuffer)
-	if err != nil {
-		log.Fatal(err)
+		_, err = conn.Read(readBuffer)
+		if err != nil {
+			log.Fatal(err)
+		}
+		uniqueIdentifier := string(readBuffer)
+
+		var arr [bucketNameLength]byte
+		copy(arr[:], uniqueIdentifier[:bucketNameLength])
+		log.Printf("generate result: %+v", arr[:])
+
+		bucketPutRequest := BucketPutBytesRequest{Header: Header{MessageType: bucketPutBytesMessageType, Version: 1}, UniqueIdentifier: arr}
+		connectionByteBuffer, err = serializeMessage(bucketPutRequest)
+		if err != nil {
+			log.Fatal(err)
+		}
+		conn.Write([]byte{byte(connectionByteBuffer.Len())})
+		_, err = conn.Write(connectionByteBuffer.Next(connectionByteBuffer.Len()))
+
+		_, err = conn.Read(readBuffer)
+		if err != nil {
+			log.Fatal(err)
+		}
+		println("put result: " + string(readBuffer))
+
+		time.Sleep(1000 * time.Millisecond)
 	}
-	println("result: " + string(readBuffer))
 	conn.Close()
 }
 
 const (
 	requestPending = iota
+	messagePending
 	dataPending
 	dataComplete
 )
 
 func handleServerRequest(c net.Conn) {
-	connectionByteBuffer := bytes.Buffer{}
 	for {
+		var err error
 		log.Print("incoming connection")
-		readBuffer := make([]byte, 1024)
-		bytesRead, err := c.Read(readBuffer)
+		buff := make([]byte, 256)
+		bufferReader := bufio.NewReader(c)
+		size, err := bufferReader.ReadByte()
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Printf("bytes read: %d", bytesRead)
-		_, err = connectionByteBuffer.Write(readBuffer)
+		_, err = io.ReadFull(bufferReader, buff[:size])
 		if err != nil {
 			log.Fatal(err)
 		}
-		if connectionByteBuffer.Len() >= 8 {
-			header := Header{}
-			err = binary.Read(&connectionByteBuffer, binary.BigEndian, &header.MessageType)
+		messageBuffer := bytes.NewBuffer(buff)
+		message, err := deserializeMessage(messageBuffer)
+		if err != nil {
+			log.Fatal(err)
+		}
+		switch v := message.(type) {
+		case BucketGenerateRequest:
+			log.Printf("BucketGenerateRequest: %+v", message)
+			bucketGenerateResponse, err := bucketGenerate(v)
 			if err != nil {
 				log.Fatal(err)
 			}
-			log.Printf("message type: %d", header.MessageType)
-			err = binary.Read(&connectionByteBuffer, binary.BigEndian, &header.Version)
-			if err != nil {
-				log.Fatal(err)
-			}
-			if header.MessageType == bucketGenerateRequestType {
-				bucketGenerateRequest := BucketGenerateRequest{Header: header}
-				err = binary.Read(&connectionByteBuffer, binary.BigEndian, &bucketGenerateRequest.NumBytesInBucket)
-				if err != nil {
-					log.Fatal(err)
-				}
-				bucketGenerateResponse, err := bucketGenerate(bucketGenerateRequest, &connectionByteBuffer)
-				if err != nil {
-					log.Fatal(err)
-				}
-				r := []byte(bucketGenerateResponse.UniqueIdentifier)
-				c.Write(r)
-				break
-			}
+			c.Write([]byte(bucketGenerateResponse.UniqueIdentifier))
+		case BucketPutBytesRequest:
+			log.Printf("BucketPutBytesRequest: %+v", message)
+			c.Write([]byte("OK"))
 		}
 	}
 	c.Close()
