@@ -43,6 +43,7 @@ const bucketNameLength = 6
 const (
 	bucketGenerateMessageType = 1000
 	bucketPutBytesMessageType = 1001
+	bucketGetBytesMessageType = 1002
 )
 
 type Header struct {
@@ -73,6 +74,11 @@ type BucketPutBytesRequest struct {
 type BucketPutBytesResponse struct {
 	Header
 	ErrorCode int32
+}
+
+type BucketGetBytesRequest struct {
+	Header
+	UniqueIdentifier [bucketNameLength]byte
 }
 
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -122,6 +128,17 @@ func serializeMessage(message interface{}) (*bytes.Buffer, error) {
 			return nil, err
 		}
 		return byteBuffer, nil
+	case BucketGetBytesRequest:
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.MessageType); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.Version); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.UniqueIdentifier); err != nil {
+			return nil, err
+		}
+		return byteBuffer, nil
 	}
 	return nil, errors.New("unmapped type to serialize")
 }
@@ -155,7 +172,13 @@ func deserializeMessage(messageBytes *bytes.Buffer) (interface{}, error) {
 			return nil, err
 		}
 		return ret, nil
-
+	case bucketGetBytesMessageType:
+		ret := BucketGetBytesRequest{Header: header}
+		err = binary.Read(messageBytes, binary.BigEndian, &ret.UniqueIdentifier)
+		if err != nil {
+			return nil, err
+		}
+		return ret, nil
 	}
 	return nil, errors.New("unmapped message type")
 }
@@ -185,39 +208,82 @@ func startClient(destinationIPAndPort string) {
 	}
 
 	bufferReader := bufio.NewReader(conn)
-	buff := make([]byte, 256)
 	for {
-		bucketGenerateRequest := BucketGenerateRequest{Header: Header{MessageType: bucketGenerateMessageType, Version: 1}, NumBytesInBucket: 24}
-		connectionByteBuffer, err := serializeMessage(bucketGenerateRequest)
-		if err != nil {
-			log.Fatal(err)
-		}
-		conn.Write([]byte{byte(connectionByteBuffer.Len())})
-		_, err = conn.Write(connectionByteBuffer.Next(connectionByteBuffer.Len()))
+		var uniqIdentifier [bucketNameLength]byte
+		{
+			bucketGenerateRequest := BucketGenerateRequest{Header: Header{MessageType: bucketGenerateMessageType, Version: 1}, NumBytesInBucket: 24}
+			connectionByteBuffer, err := serializeMessage(bucketGenerateRequest)
+			if err != nil {
+				log.Fatal(err)
+			}
+			conn.Write([]byte{byte(connectionByteBuffer.Len())})
+			_, err = conn.Write(connectionByteBuffer.Next(connectionByteBuffer.Len()))
 
-		_, err = io.ReadFull(bufferReader, buff[:bucketNameLength])
-		if err != nil {
-			log.Fatal(err)
-		}
-		var arr [bucketNameLength]byte
-		copy(arr[:], buff[:bucketNameLength])
-		log.Printf("generate result: %+v string: %s", arr[:], string(buff[:bucketNameLength]))
+			buffMessageLength := make([]byte, 8)
+			_, err = io.ReadFull(bufferReader, buffMessageLength)
+			if err != nil {
+				log.Fatal(err)
+			}
+			var size int64
+			binary.Read(bytes.NewBuffer(buffMessageLength), binary.BigEndian, &size)
+			if err != nil {
+				log.Fatal(err)
+			}
 
-		bucketPutRequest := BucketPutBytesRequest{Header: Header{MessageType: bucketPutBytesMessageType, Version: 1}, UniqueIdentifier: arr}
-		connectionByteBuffer, err = serializeMessage(bucketPutRequest)
-		if err != nil {
-			log.Fatal(err)
+			log.Printf("size: %+v", size)
+			buffMessage := make([]byte, 256)
+			log.Printf("hello")
+			io.ReadFull(bufferReader, buffMessage[:size])
+			copy(uniqIdentifier[:], buffMessage[:size])
+			log.Printf("bucket id: %s", string(uniqIdentifier[:]))
+			time.Sleep(1000 * time.Millisecond)
 		}
-		conn.Write([]byte{byte(connectionByteBuffer.Len())})
-		_, err = conn.Write(connectionByteBuffer.Next(connectionByteBuffer.Len()))
 
-		_, err = io.ReadFull(bufferReader, buff[:2])
-		if err != nil {
-			log.Fatal(err)
+		{
+			bucketPutRequest := BucketPutBytesRequest{Header: Header{MessageType: bucketPutBytesMessageType, Version: 1}, UniqueIdentifier: uniqIdentifier}
+			connectionByteBuffer, err := serializeMessage(bucketPutRequest)
+			if err != nil {
+				log.Fatal(err)
+			}
+			conn.Write([]byte{byte(connectionByteBuffer.Len())})
+			_, err = conn.Write(connectionByteBuffer.Next(connectionByteBuffer.Len()))
+
+			buffMessageLength := make([]byte, 8)
+			_, err = io.ReadFull(bufferReader, buffMessageLength)
+			var size int64
+			binary.Read(bytes.NewBuffer(buffMessageLength), binary.BigEndian, &size)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			buffMessage := make([]byte, 256)
+			io.ReadFull(bufferReader, buffMessage[:size])
+			log.Printf("put result: %+v", string(buffMessage[:size]))
+			time.Sleep(1000 * time.Millisecond)
 		}
-		log.Printf("put result: %+v", string(buff[:2]))
 
-		time.Sleep(1000 * time.Millisecond)
+		{
+			bucketGetRequest := BucketGetBytesRequest{Header: Header{MessageType: bucketGetBytesMessageType, Version: 1}, UniqueIdentifier: uniqIdentifier}
+			connectionByteBuffer, err := serializeMessage(bucketGetRequest)
+			if err != nil {
+				log.Fatal(err)
+			}
+			conn.Write([]byte{byte(connectionByteBuffer.Len())})
+			_, err = conn.Write(connectionByteBuffer.Next(connectionByteBuffer.Len()))
+
+			buffMessageLength := make([]byte, 8)
+			_, err = io.ReadFull(bufferReader, buffMessageLength)
+			var size int64
+			binary.Read(bytes.NewBuffer(buffMessageLength), binary.BigEndian, &size)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			buffMessage := make([]byte, 256)
+			io.ReadFull(bufferReader, buffMessage[:size])
+			log.Printf("get result: %+v", string(buffMessage[:size]))
+			time.Sleep(1000 * time.Millisecond)
+		}
 	}
 	conn.Close()
 }
@@ -236,6 +302,7 @@ func handleServerRequest(c net.Conn) {
 		buff := make([]byte, 256)
 		bufferReader := bufio.NewReader(c)
 		size, err := bufferReader.ReadByte()
+		buf := new(bytes.Buffer)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -255,10 +322,22 @@ func handleServerRequest(c net.Conn) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			c.Write([]byte(bucketGenerateResponse.UniqueIdentifier))
+			log.Printf(string(bucketGenerateResponse.UniqueIdentifier))
+			binary.Write(buf, binary.BigEndian, int64(len(bucketGenerateResponse.UniqueIdentifier)))
+			binary.Write(buf, binary.BigEndian, []byte(bucketGenerateResponse.UniqueIdentifier))
+			c.Write(buf.Bytes())
 		case BucketPutBytesRequest:
 			log.Printf("BucketPutBytesRequest: %+v", message)
-			c.Write([]byte("OK"))
+			payload := "OK"
+			binary.Write(buf, binary.BigEndian, int64(len(payload)))
+			binary.Write(buf, binary.BigEndian, []byte(payload))
+			c.Write(buf.Bytes())
+		case BucketGetBytesRequest:
+			log.Printf("BucketGetBytesRequest: %+v", message)
+			payload := "[[FILE CONTENTS]]"
+			binary.Write(buf, binary.BigEndian, int64(len(payload)))
+			binary.Write(buf, binary.BigEndian, []byte(payload))
+			c.Write(buf.Bytes())
 		}
 	}
 	c.Close()
