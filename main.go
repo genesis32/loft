@@ -232,11 +232,10 @@ func startClient(destinationIPAndPort string) {
 
 			log.Printf("size: %+v", size)
 			buffMessage := make([]byte, 256)
-			log.Printf("hello")
 			io.ReadFull(bufferReader, buffMessage[:size])
 			copy(uniqIdentifier[:], buffMessage[:size])
 			log.Printf("bucket id: %s", string(uniqIdentifier[:]))
-			time.Sleep(1000 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 
 		{
@@ -259,7 +258,7 @@ func startClient(destinationIPAndPort string) {
 			buffMessage := make([]byte, 256)
 			io.ReadFull(bufferReader, buffMessage[:size])
 			log.Printf("put result: %+v", string(buffMessage[:size]))
-			time.Sleep(1000 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 
 		{
@@ -282,7 +281,7 @@ func startClient(destinationIPAndPort string) {
 			buffMessage := make([]byte, 256)
 			io.ReadFull(bufferReader, buffMessage[:size])
 			log.Printf("get result: %+v", string(buffMessage[:size]))
-			time.Sleep(1000 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 	conn.Close()
@@ -301,6 +300,7 @@ func handleServerRequest(c net.Conn) {
 		log.Print("incoming connection")
 		buff := make([]byte, 256)
 		bufferReader := bufio.NewReader(c)
+		// TODO: Switch to 64bit
 		size, err := bufferReader.ReadByte()
 		buf := new(bytes.Buffer)
 		if err != nil {
