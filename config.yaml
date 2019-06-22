@@ -1,4 +1,5 @@
 listenPort: ":8089"
 sslEnabled: false
+bucketPath: "/Users/dmassey/Proj/loft-buckets"
 serverKeyPath: "server.key"
 serverCertPath: "server.pem"

@@ -14,6 +14,8 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"os"
+	"path"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -35,6 +37,7 @@ type configuration struct {
 	SslEnabled     bool
 	ServerKeyPath  string
 	ServerCertPath string
+	BucketPath     string
 	ListenPort     string
 }
 
@@ -94,7 +97,18 @@ func generateBucketName(n int) string {
 // TODO: wrap these functions in the binary protocol parser
 func bucketGenerate(request BucketGenerateRequest) (BucketGenerateResponse, error) {
 	bucketName := generateBucketName(bucketNameLength)
+	bucketPath := path.Join(runtimeConfig.BucketPath, bucketName)
 	bucketGenerateResponse := BucketGenerateResponse{UniqueIdentifier: bucketName, ErrorCode: 0}
+	f, err := os.Create(bucketPath)
+	if err != nil {
+		bucketGenerateResponse.ErrorCode = 1
+		return bucketGenerateResponse, err
+	}
+
+	if err := f.Truncate(request.NumBytesInBucket); err != nil {
+		bucketGenerateResponse.ErrorCode = 2
+		return bucketGenerateResponse, err
+	}
 	return bucketGenerateResponse, nil
 }
 
@@ -302,10 +316,14 @@ func handleServerRequest(c net.Conn) {
 		bufferReader := bufio.NewReader(c)
 		// TODO: Switch to 64bit
 		size, err := bufferReader.ReadByte()
-		buf := new(bytes.Buffer)
 		if err != nil {
-			log.Fatal(err)
+			if err == io.EOF {
+				break
+			} else {
+				log.Fatal(err)
+			}
 		}
+		buf := new(bytes.Buffer)
 		_, err = io.ReadFull(bufferReader, buff[:size])
 		if err != nil {
 			log.Fatal(err)
@@ -346,7 +364,7 @@ func handleServerRequest(c net.Conn) {
 func startServer() {
 	var err error
 	var l net.Listener
-	log.Println("Starting Server")
+	log.Println("Starting Server bucket path:", runtimeConfig.BucketPath)
 	if runtimeConfig.SslEnabled {
 		serverKey, err := ioutil.ReadFile(runtimeConfig.ServerKeyPath)
 		if err != nil {
