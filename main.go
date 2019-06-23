@@ -76,7 +76,8 @@ type BucketPutBytesRequest struct {
 // BucketPutBytesResponse  lbha
 type BucketPutBytesResponse struct {
 	Header
-	ErrorCode int32
+	ErrorCode        int32
+	UniqueIdentifier string
 }
 
 type BucketGetBytesRequest struct {
@@ -112,8 +113,51 @@ func bucketGenerate(request BucketGenerateRequest) (BucketGenerateResponse, erro
 	return bucketGenerateResponse, nil
 }
 
-func bucketPutBytes(request BucketPutBytesRequest) (*BucketPutBytesResponse, error) {
-	return nil, nil
+func bucketPutBytes(r io.Reader, request BucketPutBytesRequest) (BucketPutBytesResponse, error) {
+	uniqueIdentifier := string(request.UniqueIdentifier[:])
+	bucketPutBytesResponse := BucketPutBytesResponse{UniqueIdentifier: uniqueIdentifier, ErrorCode: 0}
+
+	bucketPath := path.Join(runtimeConfig.BucketPath, uniqueIdentifier)
+	fileInfo, err := os.Stat(bucketPath)
+	if err != nil {
+		log.Printf("error putting bytes: %+v", err)
+		bucketPutBytesResponse.ErrorCode = 1
+		return bucketPutBytesResponse, err
+	}
+
+	numBytesToRead := fileInfo.Size()
+	log.Printf("bucketName:%s bucketSize: %d", uniqueIdentifier, numBytesToRead)
+
+	f, err := os.Create(bucketPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	buff := make([]byte, 32*1024)
+	for numBytesToRead > int64(0) {
+		bytesRead, err := r.Read(buff)
+		if err != nil {
+			f.Close()
+			if err == io.EOF {
+				return bucketPutBytesResponse, err
+			}
+			os.Remove(bucketPath)
+			bucketPutBytesResponse.ErrorCode = 2
+			return bucketPutBytesResponse, err
+		}
+		nb, err := f.Write(buff[:bytesRead])
+		log.Printf("wrote %d bytes to file", nb)
+		if err != nil {
+			f.Close()
+			os.Remove(bucketPath)
+			bucketPutBytesResponse.ErrorCode = 3
+			return bucketPutBytesResponse, err
+		}
+		numBytesToRead -= int64(bytesRead)
+		log.Printf("number of bytes left to read: %d", numBytesToRead)
+	}
+
+	// open file
+	return bucketPutBytesResponse, nil
 }
 
 func serializeMessage(message interface{}) (*bytes.Buffer, error) {
@@ -225,7 +269,7 @@ func startClient(destinationIPAndPort string) {
 	for {
 		var uniqIdentifier [bucketNameLength]byte
 		{
-			bucketGenerateRequest := BucketGenerateRequest{Header: Header{MessageType: bucketGenerateMessageType, Version: 1}, NumBytesInBucket: 24}
+			bucketGenerateRequest := BucketGenerateRequest{Header: Header{MessageType: bucketGenerateMessageType, Version: 1}, NumBytesInBucket: 1024}
 			connectionByteBuffer, err := serializeMessage(bucketGenerateRequest)
 			if err != nil {
 				log.Fatal(err)
@@ -260,6 +304,15 @@ func startClient(destinationIPAndPort string) {
 			}
 			conn.Write([]byte{byte(connectionByteBuffer.Len())})
 			_, err = conn.Write(connectionByteBuffer.Next(connectionByteBuffer.Len()))
+
+			bytesToWrite := 1024
+			b := make([]byte, bytesToWrite)
+			for bytesToWrite > 0 {
+				rand.Read(b[:bytesToWrite])
+				bytesWritten, _ := conn.Write(b[:bytesToWrite])
+				log.Printf("wrote %d bytes to bucket", bytesWritten)
+				bytesToWrite -= bytesWritten
+			}
 
 			buffMessageLength := make([]byte, 8)
 			_, err = io.ReadFull(bufferReader, buffMessageLength)
@@ -346,7 +399,16 @@ func handleServerRequest(c net.Conn) {
 			c.Write(buf.Bytes())
 		case BucketPutBytesRequest:
 			log.Printf("BucketPutBytesRequest: %+v", message)
-			payload := "OK"
+			bucketPutBytesResponse, err := bucketPutBytes(bufferReader, v)
+			if err != nil {
+				log.Fatal(err)
+			}
+			var payload string
+			if bucketPutBytesResponse.ErrorCode == 0 {
+				payload = "OK"
+			} else {
+				payload = fmt.Sprintf("ERROR_CODE=%d", bucketPutBytesResponse.ErrorCode)
+			}
 			binary.Write(buf, binary.BigEndian, int64(len(payload)))
 			binary.Write(buf, binary.BigEndian, []byte(payload))
 			c.Write(buf.Bytes())
