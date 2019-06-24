@@ -85,6 +85,12 @@ type BucketGetBytesRequest struct {
 	UniqueIdentifier [bucketNameLength]byte
 }
 
+type BucketGetBytesResponse struct {
+	Header
+	ErrorCode int32
+	Size      int64
+}
+
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 func generateBucketName(n int) string {
@@ -158,6 +164,44 @@ func bucketPutBytes(r io.Reader, request BucketPutBytesRequest) (BucketPutBytesR
 
 	// open file
 	return bucketPutBytesResponse, nil
+}
+
+func bucketGetBytes(w io.Writer, request BucketGetBytesRequest) (BucketGetBytesResponse, error) {
+	uniqueIdentifier := string(request.UniqueIdentifier[:])
+	bucketGetBytesResponse := BucketGetBytesResponse{ErrorCode: 0}
+
+	bucketPath := path.Join(runtimeConfig.BucketPath, uniqueIdentifier)
+	fileInfo, err := os.Stat(bucketPath)
+	if err != nil {
+		log.Printf("cannot find bucket '%s' err: %+v", bucketPath, err)
+		bucketGetBytesResponse.ErrorCode = 1
+		binary.Write(w, binary.BigEndian, int64(-1))
+		return bucketGetBytesResponse, err
+	}
+
+	bucketGetBytesResponse.Size = fileInfo.Size()
+
+	binary.Write(w, binary.BigEndian, bucketGetBytesResponse.Size)
+	log.Printf("Writing size: %d bytes", bucketGetBytesResponse.Size)
+
+	fp, _ := os.Open(bucketPath)
+	defer fp.Close()
+
+	buff := make([]byte, 32*1024)
+	for true {
+		var err error
+		bytesRead, err := fp.Read(buff)
+		if bytesRead == 0 && err == io.EOF {
+			break
+		}
+		bytesWrote, err := w.Write(buff[:bytesRead])
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Wrote %d bytes", bytesWrote)
+	}
+
+	return bucketGetBytesResponse, nil
 }
 
 func serializeMessage(message interface{}) (*bytes.Buffer, error) {
@@ -296,6 +340,7 @@ func startClient(destinationIPAndPort string) {
 			time.Sleep(100 * time.Millisecond)
 		}
 
+		// TODO: Fix that bytes sent must be === to size of bucket
 		{
 			bucketPutRequest := BucketPutBytesRequest{Header: Header{MessageType: bucketPutBytesMessageType, Version: 1}, UniqueIdentifier: uniqIdentifier}
 			connectionByteBuffer, err := serializeMessage(bucketPutRequest)
@@ -343,6 +388,18 @@ func startClient(destinationIPAndPort string) {
 			binary.Read(bytes.NewBuffer(buffMessageLength), binary.BigEndian, &size)
 			if err != nil {
 				log.Fatal(err)
+			}
+			log.Printf("Reading %d bytes", size)
+
+			buff := make([]byte, 32*1024)
+			for size > 0 {
+				var err error
+				bytesRead, err := bufferReader.Read(buff)
+				if bytesRead == 0 && err == io.EOF {
+					break
+				}
+				os.Stdout.Write(buff[:bytesRead])
+				size -= int64(bytesRead)
 			}
 
 			buffMessage := make([]byte, 256)
@@ -414,10 +471,12 @@ func handleServerRequest(c net.Conn) {
 			c.Write(buf.Bytes())
 		case BucketGetBytesRequest:
 			log.Printf("BucketGetBytesRequest: %+v", message)
-			payload := "[[FILE CONTENTS]]"
-			binary.Write(buf, binary.BigEndian, int64(len(payload)))
-			binary.Write(buf, binary.BigEndian, []byte(payload))
-			c.Write(buf.Bytes())
+			bufferWriter := bufio.NewWriter(c)
+			_, err := bucketGetBytes(bufferWriter, v)
+			if err != nil {
+				log.Fatal(err)
+			}
+			bufferWriter.Flush()
 		}
 	}
 	c.Close()
