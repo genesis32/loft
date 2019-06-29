@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"io/ioutil"
 	"log"
@@ -341,6 +342,7 @@ func startClient(destinationIPAndPort string) {
 		}
 
 		// TODO: Fix that bytes sent must be === to size of bucket
+		var writtenCrc32 uint32
 		{
 			bucketPutRequest := BucketPutBytesRequest{Header: Header{MessageType: bucketPutBytesMessageType, Version: 1}, UniqueIdentifier: uniqIdentifier}
 			connectionByteBuffer, err := serializeMessage(bucketPutRequest)
@@ -352,12 +354,14 @@ func startClient(destinationIPAndPort string) {
 
 			bytesToWrite := 1024
 			b := make([]byte, bytesToWrite)
-			for bytesToWrite > 0 {
-				rand.Read(b[:bytesToWrite])
-				bytesWritten, _ := conn.Write(b[:bytesToWrite])
+			rand.Read(b[:bytesToWrite])
+			offset := 0
+			for offset < bytesToWrite {
+				bytesWritten, _ := conn.Write(b[offset:bytesToWrite])
 				log.Printf("wrote %d bytes to bucket", bytesWritten)
-				bytesToWrite -= bytesWritten
+				offset += bytesWritten
 			}
+			writtenCrc32 = crc32.ChecksumIEEE(b)
 
 			buffMessageLength := make([]byte, 8)
 			_, err = io.ReadFull(bufferReader, buffMessageLength)
@@ -373,6 +377,7 @@ func startClient(destinationIPAndPort string) {
 			time.Sleep(100 * time.Millisecond)
 		}
 
+		var readCrc32 uint32
 		{
 			bucketGetRequest := BucketGetBytesRequest{Header: Header{MessageType: bucketGetBytesMessageType, Version: 1}, UniqueIdentifier: uniqIdentifier}
 			connectionByteBuffer, err := serializeMessage(bucketGetRequest)
@@ -389,24 +394,25 @@ func startClient(destinationIPAndPort string) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			log.Printf("Reading %d bytes", size)
 
 			buff := make([]byte, 32*1024)
-			for size > 0 {
+			byteBufferRead := make([]byte, 0)
+			var totalBytesRead int64
+			for totalBytesRead < size {
 				var err error
 				bytesRead, err := bufferReader.Read(buff)
 				if bytesRead == 0 && err == io.EOF {
 					break
 				}
-				os.Stdout.Write(buff[:bytesRead])
-				size -= int64(bytesRead)
+				byteBufferRead = append(byteBufferRead, buff[:bytesRead]...)
+				totalBytesRead += int64(bytesRead)
 			}
+			fmt.Printf("read %d bytes\n", len(byteBufferRead))
 
-			buffMessage := make([]byte, 256)
-			io.ReadFull(bufferReader, buffMessage[:size])
-			log.Printf("get result: %+v", string(buffMessage[:size]))
+			readCrc32 = crc32.ChecksumIEEE(byteBufferRead)
 			time.Sleep(100 * time.Millisecond)
 		}
+		fmt.Printf("written crc32: %d read crc32: %d\n", writtenCrc32, readCrc32)
 	}
 	conn.Close()
 }
