@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"os"
 
 	"github.com/pkg/errors"
 )
@@ -61,7 +62,12 @@ func writeMessageToServer(conn net.Conn, message interface{}) error {
 	return nil
 }
 
-func writeBytesToServer(conn net.Conn, fileReader io.Reader) error {
+func writeBytesToServer(conn net.Conn, byteReader *bufio.Reader) error {
+	bufferedWriter := bufio.NewWriter(conn)
+	bytesWritten, err := byteReader.WriteTo(bufferedWriter)
+	if err != nil {
+		return errors.Wrapf(err, "failed writing bytes to server bytes written: %d", bytesWritten)
+	}
 	return nil
 }
 
@@ -143,8 +149,16 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 	if err != nil {
 		return 0, errors.Wrap(err, "error writing message to server.")
 	}
-	//open file and make a buffered read)
-	writeBytesToServer(c.conn, nil)
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, errors.Wrapf(err, "failure opening file %s", filePath)
+	}
+	defer f.Close()
+	err = writeBytesToServer(c.conn, bufio.NewReader(f))
+	if err != nil {
+		return 0, errors.Wrapf(err, "error writing bytes to server")
+	}
 
 	return 0, nil
 }

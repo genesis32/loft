@@ -565,10 +565,14 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		bucketIdentifier, err := client.CreateBucket(1000)
+		bucketIdentifier, err := client.CreateBucket(16384)
 		if err != nil {
 			log.Fatal(err)
 		}
 		log.Printf("bucket id: %s", bucketIdentifier)
+		_, err = client.PutFileInBucket(bucketIdentifier, "/home/ddm/loft-test-file")
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 }
