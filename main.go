@@ -289,7 +289,6 @@ func deserializeMessage(messageBytes *bytes.Buffer) (interface{}, error) {
 func startClient(destinationIPAndPort string) {
 	var err error
 	var conn net.Conn
-	fmt.Println("foo", destinationIPAndPort)
 	if runtimeConfig.SslEnabled {
 		rootCert, err := ioutil.ReadFile("../loftserver/server.pem")
 		if err != nil {
@@ -555,6 +554,21 @@ func main() {
 		startServer()
 	} else {
 		dst := viper.GetString("dst")
-		startClient(dst)
+		//		startClient(dst)
+		cl := ClientConfiguration{
+			ServerAddrAndPort:     dst,
+			SslEnabled:            runtimeConfig.SslEnabled,
+			SslClientCertFilePath: runtimeConfig.ServerCertPath,
+		}
+		client := newClient(cl)
+		err := client.Connect()
+		if err != nil {
+			log.Fatal(err)
+		}
+		bucketIdentifier, err := client.CreateBucket(1000)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("bucket id: %s", bucketIdentifier)
 	}
 }
