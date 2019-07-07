@@ -35,7 +35,7 @@ type LoftClient interface {
 	Connect() error
 	CreateBucket(int64) (string, error)
 	PutFileInBucket(string, string) (uint32, error)
-	PutBucketInFile()
+	PutBucketInFile(string, string) error
 }
 
 func newClient(config ClientConfiguration) LoftClient {
@@ -66,8 +66,9 @@ func writeBytesToServer(conn net.Conn, byteReader *bufio.Reader) error {
 	bufferedWriter := bufio.NewWriter(conn)
 	bytesWritten, err := byteReader.WriteTo(bufferedWriter)
 	if err != nil {
-		return errors.Wrapf(err, "failed writing bytes to server bytes written: %d", bytesWritten)
+		return errors.Wrapf(err, "failed. wrote %d bytes to server.", bytesWritten)
 	}
+	log.Printf("Number of bytes written: %d", bytesWritten)
 	return nil
 }
 
@@ -150,6 +151,8 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 		return 0, errors.Wrap(err, "error writing message to server.")
 	}
 
+	bufferReader := bufio.NewReader(c.conn)
+
 	f, err := os.Open(filePath)
 	if err != nil {
 		return 0, errors.Wrapf(err, "failure opening file %s", filePath)
@@ -160,9 +163,56 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 		return 0, errors.Wrapf(err, "error writing bytes to server")
 	}
 
+	buffMessageLength := make([]byte, 8)
+	_, err = io.ReadFull(bufferReader, buffMessageLength)
+	var size int64
+	binary.Read(bytes.NewBuffer(buffMessageLength), binary.BigEndian, &size)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	return 0, nil
 }
 
-func (c *Client) PutBucketInFile() {
+func (c *Client) PutBucketInFile(bucketIdentifer string, filePath string) error {
+	var bucketIdentifierBytes [bucketNameLength]byte
+	copy(bucketIdentifierBytes[:], []byte(bucketIdentifer))
+	bucketGetRequest := BucketGetBytesRequest{Header: Header{MessageType: bucketGetBytesMessageType, Version: 1}, UniqueIdentifier: bucketIdentifierBytes}
+	err := writeMessageToServer(c.conn, bucketGetRequest)
+	if err != nil {
+		return errors.Wrap(err, "error writing message to server.")
+	}
 
+	bufferReader := bufio.NewReader(c.conn)
+
+	buffMessageLength := make([]byte, 8)
+	_, err = io.ReadFull(bufferReader, buffMessageLength)
+	var size int64
+	binary.Read(bytes.NewBuffer(buffMessageLength), binary.BigEndian, &size)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	f, err := os.Create(filePath)
+	if err != nil {
+		return errors.Wrapf(err, "failure opening file %s", filePath)
+	}
+	defer f.Close()
+
+	buff := make([]byte, 128*1024)
+	var totalBytesRead int64
+	for totalBytesRead < size {
+		var err error
+		bytesRead, err := bufferReader.Read(buff)
+		if bytesRead == 0 && err == io.EOF {
+			break
+		}
+		n, err := f.Write(buff[:bytesRead])
+		if err != nil {
+			return errors.Wrapf(err, "failed to write file. wrote %d bytes", n)
+		}
+		totalBytesRead += int64(bytesRead)
+	}
+
+	return nil
 }

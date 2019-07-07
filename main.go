@@ -574,5 +574,9 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		err = client.PutBucketInFile(bucketIdentifier, "/home/ddm/loft-test-file-recv")
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 }
