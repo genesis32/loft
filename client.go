@@ -26,9 +26,10 @@ type ClientConfiguration struct {
 }
 
 type Client struct {
-	config        ClientConfiguration
-	receiveBuffer []byte
-	conn          net.Conn
+	config         ClientConfiguration
+	bufferedReader io.Reader
+	bufferedWriter io.Writer
+	conn           net.Conn
 }
 
 type LoftClient interface {
@@ -40,7 +41,6 @@ type LoftClient interface {
 
 func newClient(config ClientConfiguration) LoftClient {
 	newClient := &Client{config: config}
-	newClient.receiveBuffer = make([]byte, receiveBufferSize)
 	return newClient
 }
 
@@ -72,12 +72,11 @@ func writeBytesToServer(conn net.Conn, byteReader *bufio.Reader) error {
 	return nil
 }
 
-func readMessageFromServer(conn net.Conn) ([]byte, error) {
+func readMessageFromServer(reader io.Reader) ([]byte, error) {
 	var err error
-	bufferReader := bufio.NewReader(conn)
 
 	messageSizeBuffer := make([]byte, 8)
-	_, err = io.ReadFull(bufferReader, messageSizeBuffer)
+	_, err = io.ReadFull(reader, messageSizeBuffer)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error retrieving 8 bytes for message size")
 	}
@@ -87,8 +86,9 @@ func readMessageFromServer(conn net.Conn) ([]byte, error) {
 		return nil, errors.Wrapf(err, "error translating message size")
 	}
 
+	log.Printf("message size: %d bytes", messageSize)
 	messageBuffer := make([]byte, messageSize)
-	_, err = io.ReadFull(bufferReader, messageBuffer)
+	_, err = io.ReadFull(reader, messageBuffer)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error reading message")
 	}
@@ -123,6 +123,8 @@ func (c *Client) Connect() error {
 				c.config.ServerAddrAndPort)
 		}
 	}
+	c.bufferedReader = bufio.NewReader(c.conn)
+	c.bufferedWriter = bufio.NewWriter(c.conn)
 	return nil
 }
 
@@ -183,12 +185,9 @@ func (c *Client) PutBucketInFile(bucketIdentifer string, filePath string) error 
 		return errors.Wrap(err, "error writing message to server.")
 	}
 
-	bufferReader := bufio.NewReader(c.conn)
-
-	buffMessageLength := make([]byte, 8)
-	_, err = io.ReadFull(bufferReader, buffMessageLength)
+	bufferMessage, err := readMessageFromServer(c.bufferedReader)
 	var size int64
-	binary.Read(bytes.NewBuffer(buffMessageLength), binary.BigEndian, &size)
+	binary.Read(bytes.NewBuffer(bufferMessage), binary.BigEndian, &size)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -203,7 +202,7 @@ func (c *Client) PutBucketInFile(bucketIdentifer string, filePath string) error 
 	var totalBytesRead int64
 	for totalBytesRead < size {
 		var err error
-		bytesRead, err := bufferReader.Read(buff)
+		bytesRead, err := c.bufferedReader.Read(buff)
 		if bytesRead == 0 && err == io.EOF {
 			break
 		}

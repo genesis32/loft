@@ -176,12 +176,14 @@ func bucketGetBytes(w io.Writer, request BucketGetBytesRequest) (BucketGetBytesR
 	if err != nil {
 		log.Printf("cannot find bucket '%s' err: %+v", bucketPath, err)
 		bucketGetBytesResponse.ErrorCode = 1
+		binary.Write(w, binary.BigEndian, int64(8))
 		binary.Write(w, binary.BigEndian, int64(-1))
 		return bucketGetBytesResponse, err
 	}
 
 	bucketGetBytesResponse.Size = fileInfo.Size()
 
+	binary.Write(w, binary.BigEndian, int64(8))
 	binary.Write(w, binary.BigEndian, bucketGetBytesResponse.Size)
 	log.Printf("Writing size: %d bytes", bucketGetBytesResponse.Size)
 
