@@ -467,14 +467,14 @@ func handleServerRequest(c net.Conn) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			var payload string
+			var l string
 			if bucketPutBytesResponse.ErrorCode == 0 {
-				payload = "OK"
+				l = "OK"
 			} else {
-				payload = fmt.Sprintf("ERROR_CODE=%d", bucketPutBytesResponse.ErrorCode)
+				l = fmt.Sprintf("ERROR_CODE=%d", bucketPutBytesResponse.ErrorCode)
 			}
-			binary.Write(buf, binary.BigEndian, int64(len(payload)))
-			binary.Write(buf, binary.BigEndian, []byte(payload))
+			log.Printf("put result code: %s", l)
+			binary.Write(buf, binary.BigEndian, int64(bucketPutBytesResponse.ErrorCode))
 			c.Write(buf.Bytes())
 		case BucketGetBytesRequest:
 			log.Printf("BucketGetBytesRequest: %+v", message)

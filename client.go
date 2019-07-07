@@ -27,9 +27,9 @@ type ClientConfiguration struct {
 
 type Client struct {
 	config         ClientConfiguration
-	bufferedReader io.Reader
-	bufferedWriter io.Writer
-	conn           net.Conn
+	bufferedReader *bufio.Reader
+	bufferedWriter *bufio.Writer
+	theConn        net.Conn
 }
 
 type LoftClient interface {
@@ -44,27 +44,26 @@ func newClient(config ClientConfiguration) LoftClient {
 	return newClient
 }
 
-func writeMessageToServer(conn net.Conn, message interface{}) error {
+func writeMessageToServer(w *bufio.Writer, message interface{}) error {
 	var err error
 	serializedMessage, err := SerializeMessage2(message)
 	if err != nil {
 		return errors.Wrapf(err, "failed to serialize message")
 	}
-	// TODO: Throw in a BufferedWriter
-	_, err = conn.Write([]byte{byte(serializedMessage.Len())})
+	_, err = w.Write([]byte{byte(serializedMessage.Len())})
 	if err != nil {
 		return errors.Wrapf(err, "failed to write size of message to connection")
 	}
-	_, err = conn.Write(serializedMessage.Next(serializedMessage.Len()))
+	_, err = w.Write(serializedMessage.Next(serializedMessage.Len()))
 	if err != nil {
 		return errors.Wrapf(err, "failed to write message to connection")
 	}
+	w.Flush()
 	return nil
 }
 
-func writeBytesToServer(conn net.Conn, byteReader *bufio.Reader) error {
-	bufferedWriter := bufio.NewWriter(conn)
-	bytesWritten, err := byteReader.WriteTo(bufferedWriter)
+func writeBytesToServer(w *bufio.Writer, byteReader *bufio.Reader) error {
+	bytesWritten, err := byteReader.WriteTo(w)
 	if err != nil {
 		return errors.Wrapf(err, "failed. wrote %d bytes to server.", bytesWritten)
 	}
@@ -72,7 +71,7 @@ func writeBytesToServer(conn net.Conn, byteReader *bufio.Reader) error {
 	return nil
 }
 
-func readMessageFromServer(reader io.Reader) ([]byte, error) {
+func readMessageFromServer(reader *bufio.Reader) ([]byte, error) {
 	var err error
 
 	messageSizeBuffer := make([]byte, 8)
@@ -109,33 +108,33 @@ func (c *Client) Connect() error {
 			log.Fatal("failed to parse root certificate")
 		}
 		tlsConfig := &tls.Config{RootCAs: roots}
-		c.conn, err = tls.Dial("tcp", c.config.ServerAddrAndPort, tlsConfig)
+		c.theConn, err = tls.Dial("tcp", c.config.ServerAddrAndPort, tlsConfig)
 		if err != nil {
 			return errors.Wrapf(err,
 				"Client.Connect failed to dial tls enabled server addr:",
 				c.config.ServerAddrAndPort)
 		}
 	} else {
-		c.conn, err = net.Dial("tcp", c.config.ServerAddrAndPort)
+		c.theConn, err = net.Dial("tcp", c.config.ServerAddrAndPort)
 		if err != nil {
 			return errors.Wrapf(err,
 				"Client.Connect failed to dial plaintext server addr:",
 				c.config.ServerAddrAndPort)
 		}
 	}
-	c.bufferedReader = bufio.NewReader(c.conn)
-	c.bufferedWriter = bufio.NewWriter(c.conn)
+	c.bufferedReader = bufio.NewReader(c.theConn)
+	c.bufferedWriter = bufio.NewWriter(c.theConn)
 	return nil
 }
 
 func (c *Client) CreateBucket(numBytes int64) (string, error) {
 	bucketGenerateRequest := BucketGenerateRequest{Header: Header{MessageType: bucketGenerateMessageType, Version: 1}, NumBytesInBucket: numBytes}
-	err := writeMessageToServer(c.conn, bucketGenerateRequest)
+	err := writeMessageToServer(c.bufferedWriter, bucketGenerateRequest)
 	if err != nil {
 		return "", errors.Wrap(err, "error writing message to server.")
 	}
 
-	messageBytes, err := readMessageFromServer(c.conn)
+	messageBytes, err := readMessageFromServer(c.bufferedReader)
 	if err != nil {
 		return "", errors.Wrap(err, "error reading message from server.")
 	}
@@ -148,25 +147,23 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 	copy(bucketIdentifierBytes[:], []byte(bucketIdentifier))
 
 	bucketPutRequest := BucketPutBytesRequest{Header: Header{MessageType: bucketPutBytesMessageType, Version: 1}, UniqueIdentifier: bucketIdentifierBytes}
-	err := writeMessageToServer(c.conn, bucketPutRequest)
+	err := writeMessageToServer(c.bufferedWriter, bucketPutRequest)
 	if err != nil {
 		return 0, errors.Wrap(err, "error writing message to server.")
 	}
-
-	bufferReader := bufio.NewReader(c.conn)
 
 	f, err := os.Open(filePath)
 	if err != nil {
 		return 0, errors.Wrapf(err, "failure opening file %s", filePath)
 	}
 	defer f.Close()
-	err = writeBytesToServer(c.conn, bufio.NewReader(f))
+	err = writeBytesToServer(c.bufferedWriter, bufio.NewReader(f))
 	if err != nil {
 		return 0, errors.Wrapf(err, "error writing bytes to server")
 	}
 
 	buffMessageLength := make([]byte, 8)
-	_, err = io.ReadFull(bufferReader, buffMessageLength)
+	_, err = io.ReadFull(c.bufferedReader, buffMessageLength)
 	var size int64
 	binary.Read(bytes.NewBuffer(buffMessageLength), binary.BigEndian, &size)
 	if err != nil {
@@ -180,7 +177,7 @@ func (c *Client) PutBucketInFile(bucketIdentifer string, filePath string) error 
 	var bucketIdentifierBytes [bucketNameLength]byte
 	copy(bucketIdentifierBytes[:], []byte(bucketIdentifer))
 	bucketGetRequest := BucketGetBytesRequest{Header: Header{MessageType: bucketGetBytesMessageType, Version: 1}, UniqueIdentifier: bucketIdentifierBytes}
-	err := writeMessageToServer(c.conn, bucketGetRequest)
+	err := writeMessageToServer(c.bufferedWriter, bucketGetRequest)
 	if err != nil {
 		return errors.Wrap(err, "error writing message to server.")
 	}
