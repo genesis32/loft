@@ -3,9 +3,10 @@ package main
 const bucketNameLength = 6
 
 const (
-	bucketGenerateMessageType = 1000
-	bucketPutBytesMessageType = 1001
-	bucketGetBytesMessageType = 1002
+	bucketGenerateMessageType         = 1000
+	bucketPutBytesMessageType         = 1001
+	bucketGetBytesMessageType         = 1002
+	bucketGenerateResponseMessageType = 1003
 )
 
 type Header struct {
@@ -22,8 +23,9 @@ type BucketGenerateRequest struct {
 // BucketGenerateResponse The response to bucket geneation
 type BucketGenerateResponse struct {
 	Header
-	ErrorCode        int32
-	UniqueIdentifier string
+	ErrorCode                int32
+	UniqueIdentifierNumBytes int64
+	UniqueIdentifier         [bucketNameLength]byte
 }
 
 // BucketPutBytesRequest Put the users bytes in the bucket

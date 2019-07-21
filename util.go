@@ -1,30 +1,41 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"io"
 	"log"
 	"math/rand"
 	"os"
 	"path"
+
+	"github.com/pkg/errors"
 )
 
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-func generateBucketName(n int) string {
-	b := make([]byte, n)
+func generateBucketName() [bucketNameLength]byte {
+	var b [bucketNameLength]byte
 	for i := range b {
 		b[i] = letters[rand.Intn(len(letters))]
 	}
-	return string(b)
+	return b
+}
+
+func bucketNameToString(bucketName [bucketNameLength]byte) string {
+	return string(bucketName[:])
 }
 
 func bucketGenerate2(request BucketGenerateRequest) (BucketGenerateResponse, error) {
-	bucketName := generateBucketName(bucketNameLength)
-	bucketPath := path.Join(runtimeConfig.BucketPath, bucketName)
-	bucketGenerateResponse := BucketGenerateResponse{UniqueIdentifier: bucketName, ErrorCode: 0}
+	bucketName := generateBucketName()
+	bucketPath := path.Join(runtimeConfig.BucketPath, bucketNameToString(bucketName))
+	bucketGenerateResponse := BucketGenerateResponse{
+		Header:                   Header{MessageType: bucketGenerateResponseMessageType, Version: 1},
+		UniqueIdentifier:         bucketName,
+		UniqueIdentifierNumBytes: bucketNameLength,
+		ErrorCode:                0,
+	}
 	f, err := os.Create(bucketPath)
 	if err != nil {
 		bucketGenerateResponse.ErrorCode = 1
@@ -47,14 +58,14 @@ func bucketGetBytes2(w io.Writer, request BucketGetBytesRequest) (BucketGetBytes
 	if err != nil {
 		log.Printf("cannot find bucket '%s' err: %+v", bucketPath, err)
 		bucketGetBytesResponse.ErrorCode = 1
-		binary.Write(w, binary.BigEndian, int64(8))
+		binary.Write(w, binary.BigEndian, byte(8))
 		binary.Write(w, binary.BigEndian, int64(-1))
 		return bucketGetBytesResponse, err
 	}
 
 	bucketGetBytesResponse.Size = fileInfo.Size()
 
-	binary.Write(w, binary.BigEndian, int64(8))
+	binary.Write(w, binary.BigEndian, byte(8))
 	binary.Write(w, binary.BigEndian, bucketGetBytesResponse.Size)
 	log.Printf("Writing size: %d bytes", bucketGetBytesResponse.Size)
 
@@ -161,8 +172,42 @@ func deserializeMessage2(messageBuffer *bytes.Buffer) (interface{}, error) {
 			return nil, err
 		}
 		return ret, nil
+	case bucketGenerateResponseMessageType:
+		ret := BucketGenerateResponse{Header: header}
+		err = binary.Read(messageBuffer, binary.BigEndian, &ret.ErrorCode)
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Read(messageBuffer, binary.BigEndian, &ret.UniqueIdentifierNumBytes)
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Read(messageBuffer, binary.BigEndian, &ret.UniqueIdentifier)
+		if err != nil {
+			return nil, err
+		}
+		return ret, nil
+
 	}
 	return nil, errors.New("unmapped message type")
+}
+
+func writeMessageToWriter(w *bufio.Writer, message interface{}) error {
+	var err error
+	serializedMessage, err := SerializeMessage2(message)
+	if err != nil {
+		return errors.Wrapf(err, "failed to serialize message")
+	}
+	_, err = w.Write([]byte{byte(serializedMessage.Len())})
+	if err != nil {
+		return errors.Wrapf(err, "failed to write size of message to connection")
+	}
+	_, err = w.Write(serializedMessage.Next(serializedMessage.Len()))
+	if err != nil {
+		return errors.Wrapf(err, "failed to write message to connection")
+	}
+	w.Flush()
+	return nil
 }
 
 func SerializeMessage2(message interface{}) (*bytes.Buffer, error) {
@@ -196,6 +241,23 @@ func SerializeMessage2(message interface{}) (*bytes.Buffer, error) {
 			return nil, err
 		}
 		if err = binary.Write(byteBuffer, binary.BigEndian, v.Version); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.UniqueIdentifier); err != nil {
+			return nil, err
+		}
+		return byteBuffer, nil
+	case BucketGenerateResponse:
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.MessageType); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.Version); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.ErrorCode); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.UniqueIdentifierNumBytes); err != nil {
 			return nil, err
 		}
 		if err = binary.Write(byteBuffer, binary.BigEndian, v.UniqueIdentifier); err != nil {

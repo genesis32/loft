@@ -40,24 +40,6 @@ func newClient(config ClientConfiguration) LoftClient {
 	return newClient
 }
 
-func writeMessageToServer(w *bufio.Writer, message interface{}) error {
-	var err error
-	serializedMessage, err := SerializeMessage2(message)
-	if err != nil {
-		return errors.Wrapf(err, "failed to serialize message")
-	}
-	_, err = w.Write([]byte{byte(serializedMessage.Len())})
-	if err != nil {
-		return errors.Wrapf(err, "failed to write size of message to connection")
-	}
-	_, err = w.Write(serializedMessage.Next(serializedMessage.Len()))
-	if err != nil {
-		return errors.Wrapf(err, "failed to write message to connection")
-	}
-	w.Flush()
-	return nil
-}
-
 func writeBytesToServer(w *bufio.Writer, byteReader *bufio.Reader) error {
 	bytesWritten, err := byteReader.WriteTo(w)
 	if err != nil {
@@ -70,12 +52,12 @@ func writeBytesToServer(w *bufio.Writer, byteReader *bufio.Reader) error {
 func readMessageFromServer(reader *bufio.Reader) ([]byte, error) {
 	var err error
 
-	messageSizeBuffer := make([]byte, 8)
+	messageSizeBuffer := make([]byte, 1)
 	_, err = io.ReadFull(reader, messageSizeBuffer)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error retrieving 8 bytes for message size")
 	}
-	var messageSize int64
+	var messageSize byte
 	err = binary.Read(bytes.NewBuffer(messageSizeBuffer), binary.BigEndian, &messageSize)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error translating message size")
@@ -125,7 +107,7 @@ func (c *Client) Connect() error {
 
 func (c *Client) CreateBucket(numBytes int64) (string, error) {
 	bucketGenerateRequest := BucketGenerateRequest{Header: Header{MessageType: bucketGenerateMessageType, Version: 1}, NumBytesInBucket: numBytes}
-	err := writeMessageToServer(c.bufferedWriter, bucketGenerateRequest)
+	err := writeMessageToWriter(c.bufferedWriter, bucketGenerateRequest)
 	if err != nil {
 		return "", errors.Wrap(err, "error writing message to server.")
 	}
@@ -134,8 +116,13 @@ func (c *Client) CreateBucket(numBytes int64) (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "error reading message from server.")
 	}
+	bucketGenerateResponseMessage, err := deserializeMessage2(bytes.NewBuffer(messageBytes))
+	switch v := bucketGenerateResponseMessage.(type) {
+	case BucketGenerateResponse:
+		return string(v.UniqueIdentifier[:]), nil
+	}
 
-	return string(messageBytes), nil
+	return "", nil
 }
 
 func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint32, error) {
@@ -143,7 +130,7 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 	copy(bucketIdentifierBytes[:], []byte(bucketIdentifier))
 
 	bucketPutRequest := BucketPutBytesRequest{Header: Header{MessageType: bucketPutBytesMessageType, Version: 1}, UniqueIdentifier: bucketIdentifierBytes}
-	err := writeMessageToServer(c.bufferedWriter, bucketPutRequest)
+	err := writeMessageToWriter(c.bufferedWriter, bucketPutRequest)
 	if err != nil {
 		return 0, errors.Wrap(err, "error writing message to server.")
 	}
@@ -160,6 +147,7 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 
 	buffMessageLength := make([]byte, 8)
 	_, err = io.ReadFull(c.bufferedReader, buffMessageLength)
+	//TODO: This is errorCode
 	var size int64
 	binary.Read(bytes.NewBuffer(buffMessageLength), binary.BigEndian, &size)
 	if err != nil {
@@ -173,7 +161,7 @@ func (c *Client) PutBucketInFile(bucketIdentifer string, filePath string) error 
 	var bucketIdentifierBytes [bucketNameLength]byte
 	copy(bucketIdentifierBytes[:], []byte(bucketIdentifer))
 	bucketGetRequest := BucketGetBytesRequest{Header: Header{MessageType: bucketGetBytesMessageType, Version: 1}, UniqueIdentifier: bucketIdentifierBytes}
-	err := writeMessageToServer(c.bufferedWriter, bucketGetRequest)
+	err := writeMessageToWriter(c.bufferedWriter, bucketGetRequest)
 	if err != nil {
 		return errors.Wrap(err, "error writing message to server.")
 	}

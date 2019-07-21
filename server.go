@@ -80,9 +80,8 @@ func handleServerRequest2(clientConn *ServerConnection) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			log.Printf(string(bucketGenerateResponse.UniqueIdentifier))
-			binary.Write(clientConn.bufferedWriter, binary.BigEndian, int64(len(bucketGenerateResponse.UniqueIdentifier)))
-			binary.Write(clientConn.bufferedWriter, binary.BigEndian, []byte(bucketGenerateResponse.UniqueIdentifier))
+			log.Printf(string(bucketGenerateResponse.UniqueIdentifier[:]))
+			writeMessageToWriter(clientConn.bufferedWriter, bucketGenerateResponse)
 		case BucketPutBytesRequest:
 			log.Printf("BucketPutBytesRequest: %+v", theMessage)
 			bucketPutBytesResponse, err := bucketPutBytes2(clientConn.bufferedReader, v)
