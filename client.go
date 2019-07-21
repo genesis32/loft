@@ -15,10 +15,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	receiveBufferSize = 1024 * 32
-)
-
 type ClientConfiguration struct {
 	ServerAddrAndPort     string
 	SslEnabled            bool

@@ -1,3 +1,5 @@
+*.iml
+.idea/**
 loft
 **/*.pem
 **/*.key
