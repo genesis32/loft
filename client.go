@@ -145,13 +145,14 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 		return 0, errors.Wrapf(err, "error writing bytes to server")
 	}
 
-	buffMessageLength := make([]byte, 8)
-	_, err = io.ReadFull(c.bufferedReader, buffMessageLength)
-	//TODO: This is errorCode
-	var size int64
-	binary.Read(bytes.NewBuffer(buffMessageLength), binary.BigEndian, &size)
+	messageBytes, err := readMessageFromServer(c.bufferedReader)
 	if err != nil {
-		log.Fatal(err)
+		return 0, errors.Wrap(err, "error reading message from server.")
+	}
+	msg, err := deserializeMessage2(bytes.NewBuffer(messageBytes))
+	switch v := msg.(type) {
+	case BucketPutBytesResponse:
+		log.Printf("Error Code: %d", v.ErrorCode)
 	}
 
 	return 0, nil
@@ -166,32 +167,35 @@ func (c *Client) PutBucketInFile(bucketIdentifer string, filePath string) error 
 		return errors.Wrap(err, "error writing message to server.")
 	}
 
-	bufferMessage, err := readMessageFromServer(c.bufferedReader)
-	var size int64
-	binary.Read(bytes.NewBuffer(bufferMessage), binary.BigEndian, &size)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	f, err := os.Create(filePath)
-	if err != nil {
-		return errors.Wrapf(err, "failure opening file %s", filePath)
-	}
-	defer f.Close()
-
-	buff := make([]byte, 128*1024)
-	var totalBytesRead int64
-	for totalBytesRead < size {
-		var err error
-		bytesRead, err := c.bufferedReader.Read(buff)
-		if bytesRead == 0 && err == io.EOF {
-			break
+	messageBytes, err := readMessageFromServer(c.bufferedReader)
+	msg, err := deserializeMessage2(bytes.NewBuffer(messageBytes))
+	switch v := msg.(type) {
+	case BucketGetBytesResponse:
+		log.Printf("Error Code: %d", v.ErrorCode)
+		if v.ErrorCode > 0 {
+			return errors.New("error code not 0")
 		}
-		n, err := f.Write(buff[:bytesRead])
+
+		f, err := os.Create(filePath)
 		if err != nil {
-			return errors.Wrapf(err, "failed to write file. wrote %d bytes", n)
+			return errors.Wrapf(err, "failure opening file %s", filePath)
 		}
-		totalBytesRead += int64(bytesRead)
+		defer f.Close()
+
+		buff := make([]byte, 128*1024)
+		var totalBytesRead int64
+		for totalBytesRead < v.Size {
+			var err error
+			bytesRead, err := c.bufferedReader.Read(buff)
+			if bytesRead == 0 && err == io.EOF {
+				break
+			}
+			n, err := f.Write(buff[:bytesRead])
+			if err != nil {
+				return errors.Wrapf(err, "failed to write file. wrote %d bytes", n)
+			}
+			totalBytesRead += int64(bytesRead)
+		}
 	}
 
 	return nil

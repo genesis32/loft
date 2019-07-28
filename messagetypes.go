@@ -4,9 +4,11 @@ const bucketNameLength = 6
 
 const (
 	bucketGenerateMessageType         = 1000
-	bucketPutBytesMessageType         = 1001
-	bucketGetBytesMessageType         = 1002
 	bucketGenerateResponseMessageType = 1003
+	bucketPutBytesMessageType         = 1001
+	bucketPutBytesResponseMessageType = 1004
+	bucketGetBytesMessageType         = 1002
+	bucketGetBytesResponseMessageType = 1005
 )
 
 type Header struct {
@@ -34,11 +36,10 @@ type BucketPutBytesRequest struct {
 	UniqueIdentifier [bucketNameLength]byte
 }
 
-// BucketPutBytesResponse  lbha
+// BucketPutBytesResponse
 type BucketPutBytesResponse struct {
 	Header
-	ErrorCode        int32
-	UniqueIdentifier string
+	ErrorCode int32
 }
 
 type BucketGetBytesRequest struct {

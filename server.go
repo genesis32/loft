@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -95,10 +94,10 @@ func handleServerRequest2(clientConn *ServerConnection) {
 				l = fmt.Sprintf("ERROR_CODE=%d", bucketPutBytesResponse.ErrorCode)
 			}
 			log.Printf("put result code: %s", l)
-			binary.Write(clientConn.bufferedWriter, binary.BigEndian, int64(bucketPutBytesResponse.ErrorCode))
+			writeMessageToWriter(clientConn.bufferedWriter, bucketPutBytesResponse)
 		case BucketGetBytesRequest:
 			log.Printf("BucketGetBytesRequest: %+v", theMessage)
-			_, err := bucketGetBytes2(clientConn.bufferedWriter, v)
+			err := bucketGetBytes2(clientConn.bufferedWriter, v)
 			if err != nil {
 				log.Fatal(err)
 			}
