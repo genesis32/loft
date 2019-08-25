@@ -1,11 +1,10 @@
 package main
 
 import (
-	"flag"
-	"log"
+	"fmt"
+	"os"
 
-	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
+	"github.com/genesis32/loft/cmd"
 )
 
 var runtimeConfig configuration
@@ -28,6 +27,14 @@ type configuration struct {
 }
 
 func main() {
+	if err := cmd.RootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+/*
+func main2() {
 	viper.SetConfigName("config")
 	viper.AddConfigPath(".")
 
@@ -54,7 +61,6 @@ func main() {
 			SslClientCertFilePath: runtimeConfig.ServerCertPath,
 			SslClientKeyFilePath:  runtimeConfig.ServerKeyPath,
 		}
-		//		startServer()
 		theServer := newServer(serverConfig)
 		err := theServer.StartAndServe()
 		if err != nil {
@@ -62,7 +68,6 @@ func main() {
 		}
 	} else {
 		dst := viper.GetString("dst")
-		//		startClient(dst)
 		cl := ClientConfiguration{
 			ServerAddrAndPort:     dst,
 			SslEnabled:            runtimeConfig.SslEnabled,
@@ -88,3 +93,4 @@ func main() {
 		}
 	}
 }
+*/

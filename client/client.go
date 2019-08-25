@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"bufio"
@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 
+	"github.com/genesis32/loft/util"
 	"github.com/pkg/errors"
 )
 
@@ -35,7 +36,7 @@ type LoftClient interface {
 	PutBucketInFile(string, string) error
 }
 
-func newClient(config ClientConfiguration) LoftClient {
+func NewClient(config ClientConfiguration) LoftClient {
 	newClient := &Client{config: config}
 	return newClient
 }
@@ -106,8 +107,8 @@ func (c *Client) Connect() error {
 }
 
 func (c *Client) CreateBucket(numBytes int64) (string, error) {
-	bucketGenerateRequest := BucketGenerateRequest{Header: Header{MessageType: bucketGenerateMessageType, Version: 1}, NumBytesInBucket: numBytes}
-	err := writeMessageToWriter(c.bufferedWriter, bucketGenerateRequest)
+	bucketGenerateRequest := util.BucketGenerateRequest{Header: util.Header{MessageType: util.BucketGenerateMessageType, Version: 1}, NumBytesInBucket: numBytes}
+	err := util.WriteMessageToWriter(c.bufferedWriter, bucketGenerateRequest)
 	if err != nil {
 		return "", errors.Wrap(err, "error writing message to server.")
 	}
@@ -116,9 +117,9 @@ func (c *Client) CreateBucket(numBytes int64) (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "error reading message from server.")
 	}
-	bucketGenerateResponseMessage, err := deserializeMessage2(bytes.NewBuffer(messageBytes))
+	bucketGenerateResponseMessage, err := util.DeserializeMessage2(bytes.NewBuffer(messageBytes))
 	switch v := bucketGenerateResponseMessage.(type) {
-	case BucketGenerateResponse:
+	case util.BucketGenerateResponse:
 		return string(v.UniqueIdentifier[:]), nil
 	}
 
@@ -126,7 +127,7 @@ func (c *Client) CreateBucket(numBytes int64) (string, error) {
 }
 
 func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint32, error) {
-	var bucketIdentifierBytes [bucketNameLength]byte
+	var bucketIdentifierBytes [util.BucketNameLength]byte
 	copy(bucketIdentifierBytes[:], []byte(bucketIdentifier))
 
 	f, err := os.Open(filePath)
@@ -140,13 +141,13 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 		return 0, errors.Wrap(err, "error getting stats on file")
 	}
 
-	bucketPutRequest := BucketPutBytesRequest{
-		Header:           Header{MessageType: bucketPutBytesMessageType, Version: 1},
+	bucketPutRequest := util.BucketPutBytesRequest{
+		Header:           util.Header{MessageType: util.BucketPutBytesMessageType, Version: 1},
 		UniqueIdentifier: bucketIdentifierBytes,
 		NumBytes:         fi.Size(),
 	}
 
-	err = writeMessageToWriter(c.bufferedWriter, bucketPutRequest)
+	err = util.WriteMessageToWriter(c.bufferedWriter, bucketPutRequest)
 	if err != nil {
 		return 0, errors.Wrap(err, "error writing message to server.")
 	}
@@ -161,9 +162,9 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 		return 0, errors.Wrap(err, "error reading message from server.")
 	}
 
-	msg, err := deserializeMessage2(bytes.NewBuffer(messageBytes))
+	msg, err := util.DeserializeMessage2(bytes.NewBuffer(messageBytes))
 	switch v := msg.(type) {
-	case BucketPutBytesResponse:
+	case util.BucketPutBytesResponse:
 		log.Printf("Error Code: %d", v.ErrorCode)
 	}
 
@@ -171,18 +172,18 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 }
 
 func (c *Client) PutBucketInFile(bucketIdentifer string, filePath string) error {
-	var bucketIdentifierBytes [bucketNameLength]byte
+	var bucketIdentifierBytes [util.BucketNameLength]byte
 	copy(bucketIdentifierBytes[:], []byte(bucketIdentifer))
-	bucketGetRequest := BucketGetBytesRequest{Header: Header{MessageType: bucketGetBytesMessageType, Version: 1}, UniqueIdentifier: bucketIdentifierBytes}
-	err := writeMessageToWriter(c.bufferedWriter, bucketGetRequest)
+	bucketGetRequest := util.BucketGetBytesRequest{Header: util.Header{MessageType: util.BucketGetBytesMessageType, Version: 1}, UniqueIdentifier: bucketIdentifierBytes}
+	err := util.WriteMessageToWriter(c.bufferedWriter, bucketGetRequest)
 	if err != nil {
 		return errors.Wrap(err, "error writing message to server.")
 	}
 
 	messageBytes, err := readMessageFromServer(c.bufferedReader)
-	msg, err := deserializeMessage2(bytes.NewBuffer(messageBytes))
+	msg, err := util.DeserializeMessage2(bytes.NewBuffer(messageBytes))
 	switch v := msg.(type) {
-	case BucketGetBytesResponse:
+	case util.BucketGetBytesResponse:
 		log.Printf("Error Code: %d", v.ErrorCode)
 		if v.ErrorCode > 0 {
 			return errors.New("error code not 0")

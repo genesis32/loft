@@ -1,14 +1,14 @@
-package main
+package util
 
-const bucketNameLength = 6
+const BucketNameLength = 6
 
 const (
-	bucketGenerateMessageType         = 1000
-	bucketGenerateResponseMessageType = 1003
-	bucketPutBytesMessageType         = 1001
-	bucketPutBytesResponseMessageType = 1004
-	bucketGetBytesMessageType         = 1002
-	bucketGetBytesResponseMessageType = 1005
+	BucketGenerateMessageType         = 1000
+	BucketGenerateResponseMessageType = 1003
+	BucketPutBytesMessageType         = 1001
+	BucketPutBytesResponseMessageType = 1004
+	BucketGetBytesMessageType         = 1002
+	BucketGetBytesResponseMessageType = 1005
 )
 
 type Header struct {
@@ -27,13 +27,13 @@ type BucketGenerateResponse struct {
 	Header
 	ErrorCode                int32
 	UniqueIdentifierNumBytes int64
-	UniqueIdentifier         [bucketNameLength]byte
+	UniqueIdentifier         [BucketNameLength]byte
 }
 
 // BucketPutBytesRequest Put the users bytes in the bucket
 type BucketPutBytesRequest struct {
 	Header
-	UniqueIdentifier [bucketNameLength]byte
+	UniqueIdentifier [BucketNameLength]byte
 	NumBytes         int64
 }
 
@@ -45,7 +45,7 @@ type BucketPutBytesResponse struct {
 
 type BucketGetBytesRequest struct {
 	Header
-	UniqueIdentifier [bucketNameLength]byte
+	UniqueIdentifier [BucketNameLength]byte
 }
 
 type BucketGetBytesResponse struct {

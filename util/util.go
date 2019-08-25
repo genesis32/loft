@@ -1,153 +1,15 @@
-package main
+package util
 
 import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"io"
 	"log"
-	"math/rand"
-	"os"
-	"path"
 
 	"github.com/pkg/errors"
 )
 
-const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-func generateBucketName() [bucketNameLength]byte {
-	var b [bucketNameLength]byte
-	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
-	}
-	return b
-}
-
-func bucketNameToString(bucketName [bucketNameLength]byte) string {
-	return string(bucketName[:])
-}
-
-func bucketGenerate2(request BucketGenerateRequest) (BucketGenerateResponse, error) {
-	bucketName := generateBucketName()
-	bucketPath := path.Join(runtimeConfig.BucketPath, bucketNameToString(bucketName))
-	bucketGenerateResponse := BucketGenerateResponse{
-		Header:                   Header{MessageType: bucketGenerateResponseMessageType, Version: 1},
-		UniqueIdentifier:         bucketName,
-		UniqueIdentifierNumBytes: bucketNameLength,
-		ErrorCode:                0,
-	}
-	f, err := os.Create(bucketPath)
-	if err != nil {
-		bucketGenerateResponse.ErrorCode = 1
-		return bucketGenerateResponse, err
-	}
-
-	if err := f.Truncate(request.NumBytesInBucket); err != nil {
-		bucketGenerateResponse.ErrorCode = 2
-		return bucketGenerateResponse, err
-	}
-	return bucketGenerateResponse, nil
-}
-
-func bucketGetBytes2(w *bufio.Writer, request BucketGetBytesRequest) error {
-	uniqueIdentifier := string(request.UniqueIdentifier[:])
-	bucketGetBytesResponse := BucketGetBytesResponse{
-		Header:    Header{MessageType: bucketGetBytesResponseMessageType, Version: 1},
-		ErrorCode: 0,
-		Size:      -1,
-	}
-
-	bucketPath := path.Join(runtimeConfig.BucketPath, uniqueIdentifier)
-	fileInfo, err := os.Stat(bucketPath)
-	if err != nil {
-		log.Printf("cannot find bucket '%s' err: %+v", bucketPath, err)
-		bucketGetBytesResponse.ErrorCode = 1
-		writeMessageToWriter(w, bucketGetBytesResponse)
-		return errors.Wrapf(err, "error reading bucket")
-	}
-
-	bucketGetBytesResponse.Size = fileInfo.Size()
-
-	writeMessageToWriter(w, bucketGetBytesResponse)
-	log.Printf("Writing size: %d bytes", bucketGetBytesResponse.Size)
-
-	fp, _ := os.Open(bucketPath)
-	defer fp.Close()
-
-	buff := make([]byte, 32*1024)
-	for true {
-		var err error
-		bytesRead, err := fp.Read(buff)
-		if bytesRead == 0 && err == io.EOF {
-			break
-		}
-		bytesWrote, err := w.Write(buff[:bytesRead])
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("Wrote %d bytes", bytesWrote)
-	}
-
-	return nil
-}
-
-func bucketPutBytes2(r io.Reader, w *bufio.Writer, request BucketPutBytesRequest) (BucketPutBytesResponse, error) {
-	uniqueIdentifier := string(request.UniqueIdentifier[:])
-	bucketPutBytesResponse := BucketPutBytesResponse{
-		Header:    Header{MessageType: bucketPutBytesResponseMessageType, Version: 1},
-		ErrorCode: 0,
-	}
-
-	bucketPath := path.Join(runtimeConfig.BucketPath, uniqueIdentifier)
-	fileInfo, err := os.Stat(bucketPath)
-	if err != nil {
-		log.Printf("error putting bytes: %+v", err)
-		bucketPutBytesResponse.ErrorCode = 1
-		return bucketPutBytesResponse, err
-	}
-
-	if request.NumBytes > fileInfo.Size() {
-		bucketPutBytesResponse.ErrorCode = 2
-		return bucketPutBytesResponse, err
-	}
-
-	// TODO: Always send back a message saying whether or not we accept
-	numBytesToRead := request.NumBytes
-	log.Printf("bucketName:%s bucketSize: %d", uniqueIdentifier, numBytesToRead)
-	writeMessageToWriter(w, bucketPutBytesResponse)
-
-	f, err := os.Create(bucketPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	buff := make([]byte, 32*1024)
-	for numBytesToRead > int64(0) {
-		bytesRead, err := r.Read(buff)
-		if err != nil {
-			f.Close()
-			if err == io.EOF {
-				return bucketPutBytesResponse, err
-			}
-			os.Remove(bucketPath)
-			bucketPutBytesResponse.ErrorCode = 2
-			return bucketPutBytesResponse, err
-		}
-		nb, err := f.Write(buff[:bytesRead])
-		log.Printf("wrote %d bytes to file", nb)
-		if err != nil {
-			f.Close()
-			os.Remove(bucketPath)
-			bucketPutBytesResponse.ErrorCode = 3
-			return bucketPutBytesResponse, err
-		}
-		numBytesToRead -= int64(bytesRead)
-		log.Printf("number of bytes left to read: %d", numBytesToRead)
-	}
-
-	return bucketPutBytesResponse, nil
-}
-
-func deserializeMessage2(messageBuffer *bytes.Buffer) (interface{}, error) {
+func DeserializeMessage2(messageBuffer *bytes.Buffer) (interface{}, error) {
 	var err error
 
 	header := Header{}
@@ -162,14 +24,14 @@ func deserializeMessage2(messageBuffer *bytes.Buffer) (interface{}, error) {
 	}
 
 	switch header.MessageType {
-	case bucketGenerateMessageType:
+	case BucketGenerateMessageType:
 		ret := BucketGenerateRequest{Header: header}
 		err = binary.Read(messageBuffer, binary.BigEndian, &ret.NumBytesInBucket)
 		if err != nil {
 			return nil, err
 		}
 		return ret, nil
-	case bucketPutBytesMessageType:
+	case BucketPutBytesMessageType:
 		ret := BucketPutBytesRequest{Header: header}
 		err = binary.Read(messageBuffer, binary.BigEndian, &ret.UniqueIdentifier)
 		if err != nil {
@@ -180,14 +42,14 @@ func deserializeMessage2(messageBuffer *bytes.Buffer) (interface{}, error) {
 			return nil, err
 		}
 		return ret, nil
-	case bucketGetBytesMessageType:
+	case BucketGetBytesMessageType:
 		ret := BucketGetBytesRequest{Header: header}
 		err = binary.Read(messageBuffer, binary.BigEndian, &ret.UniqueIdentifier)
 		if err != nil {
 			return nil, err
 		}
 		return ret, nil
-	case bucketGenerateResponseMessageType:
+	case BucketGenerateResponseMessageType:
 		ret := BucketGenerateResponse{Header: header}
 		err = binary.Read(messageBuffer, binary.BigEndian, &ret.ErrorCode)
 		if err != nil {
@@ -202,14 +64,14 @@ func deserializeMessage2(messageBuffer *bytes.Buffer) (interface{}, error) {
 			return nil, err
 		}
 		return ret, nil
-	case bucketPutBytesResponseMessageType:
+	case BucketPutBytesResponseMessageType:
 		ret := BucketPutBytesResponse{Header: header}
 		err = binary.Read(messageBuffer, binary.BigEndian, &ret.ErrorCode)
 		if err != nil {
 			return nil, err
 		}
 		return ret, nil
-	case bucketGetBytesResponseMessageType:
+	case BucketGetBytesResponseMessageType:
 		ret := BucketGetBytesResponse{Header: header}
 		err = binary.Read(messageBuffer, binary.BigEndian, &ret.ErrorCode)
 		if err != nil {
@@ -224,7 +86,7 @@ func deserializeMessage2(messageBuffer *bytes.Buffer) (interface{}, error) {
 	return nil, errors.New("unmapped message type")
 }
 
-func writeMessageToWriter(w *bufio.Writer, message interface{}) error {
+func WriteMessageToWriter(w *bufio.Writer, message interface{}) error {
 	var err error
 	serializedMessage, err := SerializeMessage2(message)
 	if err != nil {
