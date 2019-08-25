@@ -83,7 +83,7 @@ func handleServerRequest2(clientConn *ServerConnection) {
 			writeMessageToWriter(clientConn.bufferedWriter, bucketGenerateResponse)
 		case BucketPutBytesRequest:
 			log.Printf("BucketPutBytesRequest: %+v", theMessage)
-			bucketPutBytesResponse, err := bucketPutBytes2(clientConn.bufferedReader, v)
+			bucketPutBytesResponse, err := bucketPutBytes2(clientConn.bufferedReader, clientConn.bufferedWriter, v)
 			if err != nil {
 				log.Fatal(err)
 			}

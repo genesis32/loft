@@ -129,17 +129,28 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 	var bucketIdentifierBytes [bucketNameLength]byte
 	copy(bucketIdentifierBytes[:], []byte(bucketIdentifier))
 
-	bucketPutRequest := BucketPutBytesRequest{Header: Header{MessageType: bucketPutBytesMessageType, Version: 1}, UniqueIdentifier: bucketIdentifierBytes}
-	err := writeMessageToWriter(c.bufferedWriter, bucketPutRequest)
-	if err != nil {
-		return 0, errors.Wrap(err, "error writing message to server.")
-	}
-
 	f, err := os.Open(filePath)
 	if err != nil {
 		return 0, errors.Wrapf(err, "failure opening file %s", filePath)
 	}
 	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return 0, errors.Wrap(err, "error getting stats on file")
+	}
+
+	bucketPutRequest := BucketPutBytesRequest{
+		Header:           Header{MessageType: bucketPutBytesMessageType, Version: 1},
+		UniqueIdentifier: bucketIdentifierBytes,
+		NumBytes:         fi.Size(),
+	}
+
+	err = writeMessageToWriter(c.bufferedWriter, bucketPutRequest)
+	if err != nil {
+		return 0, errors.Wrap(err, "error writing message to server.")
+	}
+
 	err = writeBytesToServer(c.bufferedWriter, bufio.NewReader(f))
 	if err != nil {
 		return 0, errors.Wrapf(err, "error writing bytes to server")
@@ -149,6 +160,7 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 	if err != nil {
 		return 0, errors.Wrap(err, "error reading message from server.")
 	}
+
 	msg, err := deserializeMessage2(bytes.NewBuffer(messageBytes))
 	switch v := msg.(type) {
 	case BucketPutBytesResponse:

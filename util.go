@@ -91,7 +91,7 @@ func bucketGetBytes2(w *bufio.Writer, request BucketGetBytesRequest) error {
 	return nil
 }
 
-func bucketPutBytes2(r io.Reader, request BucketPutBytesRequest) (BucketPutBytesResponse, error) {
+func bucketPutBytes2(r io.Reader, w *bufio.Writer, request BucketPutBytesRequest) (BucketPutBytesResponse, error) {
 	uniqueIdentifier := string(request.UniqueIdentifier[:])
 	bucketPutBytesResponse := BucketPutBytesResponse{
 		Header:    Header{MessageType: bucketPutBytesResponseMessageType, Version: 1},
@@ -106,8 +106,15 @@ func bucketPutBytes2(r io.Reader, request BucketPutBytesRequest) (BucketPutBytes
 		return bucketPutBytesResponse, err
 	}
 
-	numBytesToRead := fileInfo.Size()
+	if request.NumBytes > fileInfo.Size() {
+		bucketPutBytesResponse.ErrorCode = 2
+		return bucketPutBytesResponse, err
+	}
+
+	// TODO: Always send back a message saying whether or not we accept
+	numBytesToRead := request.NumBytes
 	log.Printf("bucketName:%s bucketSize: %d", uniqueIdentifier, numBytesToRead)
+	writeMessageToWriter(w, bucketPutBytesResponse)
 
 	f, err := os.Create(bucketPath)
 	if err != nil {
@@ -165,6 +172,10 @@ func deserializeMessage2(messageBuffer *bytes.Buffer) (interface{}, error) {
 	case bucketPutBytesMessageType:
 		ret := BucketPutBytesRequest{Header: header}
 		err = binary.Read(messageBuffer, binary.BigEndian, &ret.UniqueIdentifier)
+		if err != nil {
+			return nil, err
+		}
+		err = binary.Read(messageBuffer, binary.BigEndian, &ret.NumBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -254,6 +265,9 @@ func SerializeMessage2(message interface{}) (*bytes.Buffer, error) {
 			return nil, err
 		}
 		if err = binary.Write(byteBuffer, binary.BigEndian, v.UniqueIdentifier); err != nil {
+			return nil, err
+		}
+		if err = binary.Write(byteBuffer, binary.BigEndian, v.NumBytes); err != nil {
 			return nil, err
 		}
 		return byteBuffer, nil

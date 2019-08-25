@@ -73,7 +73,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		bucketIdentifier, err := client.CreateBucket(16384)
+		bucketIdentifier, err := client.CreateBucket(1200000)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -34,6 +34,7 @@ type BucketGenerateResponse struct {
 type BucketPutBytesRequest struct {
 	Header
 	UniqueIdentifier [bucketNameLength]byte
+	NumBytes         int64
 }
 
 // BucketPutBytesResponse
