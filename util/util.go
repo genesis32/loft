@@ -4,10 +4,34 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"log"
+	"os"
 
 	"github.com/pkg/errors"
 )
+
+var Verbose bool
+
+func VPrintfOut(format string, v ...interface{}) {
+	if Verbose {
+		if len(v) == 0 {
+			fmt.Fprintf(os.Stdout, format)
+		} else {
+			fmt.Fprintf(os.Stdout, format, v)
+		}
+	}
+}
+
+func VPrintfErr(format string, v ...interface{}) {
+	if Verbose {
+		if len(v) == 0 {
+			fmt.Fprintf(os.Stderr, format)
+		} else {
+			fmt.Fprintf(os.Stderr, format, v)
+		}
+	}
+}
 
 func DeserializeMessage2(messageBuffer *bytes.Buffer) (interface{}, error) {
 	var err error

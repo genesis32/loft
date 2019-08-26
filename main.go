@@ -7,16 +7,14 @@ import (
 	"github.com/genesis32/loft/cmd"
 )
 
-var runtimeConfig configuration
-
 /*
+var runtimeConfig configuration
 openssl ecparam -genkey -name prime256v1 -out server.key
 openssl req -new -x509 -key server.key -out server.pem -days 3650
 */
 
 /*
 operations: bucketget,bucketcombine
-*/
 
 type configuration struct {
 	SslEnabled     bool
@@ -25,6 +23,7 @@ type configuration struct {
 	BucketPath     string
 	ListenPort     string
 }
+*/
 
 func main() {
 	if err := cmd.RootCmd.Execute(); err != nil {

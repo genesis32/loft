@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"time"
 
 	"github.com/genesis32/loft/util"
 	"github.com/pkg/errors"
@@ -21,6 +22,7 @@ type ServerConfiguration struct {
 	SslClientCertFilePath string
 	SslClientKeyFilePath  string
 	BucketPath            string
+	Verbose               bool
 }
 
 type ServerConnection struct {
@@ -64,7 +66,8 @@ func handleServerRequest2(server *Server, clientConn *ServerConnection) {
 			if err == io.EOF {
 				break
 			} else {
-				log.Fatal(err)
+				log.Print(err)
+				return
 			}
 		}
 
@@ -117,6 +120,7 @@ func handleServerRequest2(server *Server, clientConn *ServerConnection) {
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 func generateBucketName() [util.BucketNameLength]byte {
+	rand.Seed(time.Now().UnixNano())
 	var b [util.BucketNameLength]byte
 	for i := range b {
 		b[i] = letters[rand.Intn(len(letters))]
