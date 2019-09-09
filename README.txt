@@ -1,4 +1,4 @@
-Example Usage:
+Example Usage
 
 # Create the server
 loft server --config=config.yaml

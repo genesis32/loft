@@ -152,11 +152,6 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 		return 0, errors.Wrap(err, "error writing message to server.")
 	}
 
-	err = writeBytesToServer(c.bufferedWriter, bufio.NewReader(f))
-	if err != nil {
-		return 0, errors.Wrapf(err, "error writing bytes to server")
-	}
-
 	messageBytes, err := readMessageFromServer(c.bufferedReader)
 	if err != nil {
 		return 0, errors.Wrap(err, "error reading message from server.")
@@ -165,7 +160,15 @@ func (c *Client) PutFileInBucket(bucketIdentifier string, filePath string) (uint
 	msg, err := util.DeserializeMessage2(bytes.NewBuffer(messageBytes))
 	switch v := msg.(type) {
 	case util.BucketPutBytesResponse:
-		log.Printf("Error Code: %d", v.ErrorCode)
+		if v.ErrorCode != 0 {
+			log.Printf("error cannot write data to bucket error code: %d", v.ErrorCode)
+			os.Exit(1)
+		}
+	}
+
+	err = writeBytesToServer(c.bufferedWriter, bufio.NewReader(f))
+	if err != nil {
+		return 0, errors.Wrapf(err, "error writing bytes to server")
 	}
 
 	return 0, nil

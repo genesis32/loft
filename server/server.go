@@ -3,7 +3,6 @@ package server
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"log"
 	"math/rand"
@@ -42,7 +41,7 @@ type LoftServer interface {
 	StartAndServe() error
 	bucketGenerate2(request util.BucketGenerateRequest) (util.BucketGenerateResponse, error)
 	bucketGetBytes2(w *bufio.Writer, request util.BucketGetBytesRequest) error
-	bucketPutBytes2(r io.Reader, w *bufio.Writer, request util.BucketPutBytesRequest) (util.BucketPutBytesResponse, error)
+	bucketPutBytes2(r io.Reader, w *bufio.Writer, request util.BucketPutBytesRequest) error
 }
 
 func newServerConnection(conn net.Conn) *ServerConnection {
@@ -94,18 +93,10 @@ func handleServerRequest2(server *Server, clientConn *ServerConnection) {
 			util.WriteMessageToWriter(clientConn.bufferedWriter, bucketGenerateResponse)
 		case util.BucketPutBytesRequest:
 			log.Printf("BucketPutBytesRequest: %+v", theMessage)
-			bucketPutBytesResponse, err := server.bucketPutBytes2(clientConn.bufferedReader, clientConn.bufferedWriter, v)
+			err := server.bucketPutBytes2(clientConn.bufferedReader, clientConn.bufferedWriter, v)
 			if err != nil {
 				log.Fatal(err)
 			}
-			var l string
-			if bucketPutBytesResponse.ErrorCode == 0 {
-				l = "OK"
-			} else {
-				l = fmt.Sprintf("ERROR_CODE=%d", bucketPutBytesResponse.ErrorCode)
-			}
-			log.Printf("put result code: %s", l)
-			util.WriteMessageToWriter(clientConn.bufferedWriter, bucketPutBytesResponse)
 		case util.BucketGetBytesRequest:
 			log.Printf("BucketGetBytesRequest: %+v", theMessage)
 			err := server.bucketGetBytes2(clientConn.bufferedWriter, v)
@@ -217,7 +208,7 @@ func (s *Server) bucketGetBytes2(w *bufio.Writer, request util.BucketGetBytesReq
 	return nil
 }
 
-func (s *Server) bucketPutBytes2(r io.Reader, w *bufio.Writer, request util.BucketPutBytesRequest) (util.BucketPutBytesResponse, error) {
+func (s *Server) bucketPutBytes2(r io.Reader, w *bufio.Writer, request util.BucketPutBytesRequest) error {
 	uniqueIdentifier := string(request.UniqueIdentifier[:])
 	bucketPutBytesResponse := util.BucketPutBytesResponse{
 		Header:    util.Header{MessageType: util.BucketPutBytesResponseMessageType, Version: 1},
@@ -226,15 +217,18 @@ func (s *Server) bucketPutBytes2(r io.Reader, w *bufio.Writer, request util.Buck
 
 	bucketPath := path.Join(s.config.BucketPath, uniqueIdentifier)
 	fileInfo, err := os.Stat(bucketPath)
-	if err != nil {
-		log.Printf("error putting bytes: %+v", err)
+	if os.IsNotExist(err) {
+		log.Printf("bucket %s does not exist: %+v", uniqueIdentifier, err)
 		bucketPutBytesResponse.ErrorCode = 1
-		return bucketPutBytesResponse, err
+		util.WriteMessageToWriter(w, bucketPutBytesResponse)
+		return nil
 	}
 
 	if request.NumBytes > fileInfo.Size() {
+		log.Printf("request file size %d too big for bucket: %s size %d", request.NumBytes, uniqueIdentifier, fileInfo.Size())
 		bucketPutBytesResponse.ErrorCode = 2
-		return bucketPutBytesResponse, err
+		util.WriteMessageToWriter(w, bucketPutBytesResponse)
+		return nil
 	}
 
 	// TODO: Always send back a message saying whether or not we accept
@@ -252,23 +246,26 @@ func (s *Server) bucketPutBytes2(r io.Reader, w *bufio.Writer, request util.Buck
 		if err != nil {
 			f.Close()
 			if err == io.EOF {
-				return bucketPutBytesResponse, err
+				util.WriteMessageToWriter(w, bucketPutBytesResponse)
+				return nil
 			}
 			os.Remove(bucketPath)
-			bucketPutBytesResponse.ErrorCode = 2
-			return bucketPutBytesResponse, err
+			bucketPutBytesResponse.ErrorCode = 3
+			util.WriteMessageToWriter(w, bucketPutBytesResponse)
+			return err
 		}
 		nb, err := f.Write(buff[:bytesRead])
 		log.Printf("wrote %d bytes to file", nb)
 		if err != nil {
 			f.Close()
 			os.Remove(bucketPath)
-			bucketPutBytesResponse.ErrorCode = 3
-			return bucketPutBytesResponse, err
+			bucketPutBytesResponse.ErrorCode = 4
+			util.WriteMessageToWriter(w, bucketPutBytesResponse)
+			return err
 		}
 		numBytesToRead -= int64(bytesRead)
 		log.Printf("number of bytes left to read: %d", numBytesToRead)
 	}
 
-	return bucketPutBytesResponse, nil
+	return nil
 }
