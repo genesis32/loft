@@ -231,10 +231,12 @@ func (s *Server) bucketPutBytes2(r io.Reader, w *bufio.Writer, request util.Buck
 		return nil
 	}
 
-	// TODO: Always send back a message saying whether or not we accept
+	// TODO: Always send back a message saying whether or not we accept before we read the file
 	numBytesToRead := request.NumBytes
 	log.Printf("bucketName:%s bucketSize: %d", uniqueIdentifier, numBytesToRead)
 	util.WriteMessageToWriter(w, bucketPutBytesResponse)
+
+	// TODO: SHould we add anything in after the bytes have been received
 
 	f, err := os.Create(bucketPath)
 	if err != nil {
@@ -246,12 +248,9 @@ func (s *Server) bucketPutBytes2(r io.Reader, w *bufio.Writer, request util.Buck
 		if err != nil {
 			f.Close()
 			if err == io.EOF {
-				util.WriteMessageToWriter(w, bucketPutBytesResponse)
 				return nil
 			}
 			os.Remove(bucketPath)
-			bucketPutBytesResponse.ErrorCode = 3
-			util.WriteMessageToWriter(w, bucketPutBytesResponse)
 			return err
 		}
 		nb, err := f.Write(buff[:bytesRead])
@@ -259,8 +258,6 @@ func (s *Server) bucketPutBytes2(r io.Reader, w *bufio.Writer, request util.Buck
 		if err != nil {
 			f.Close()
 			os.Remove(bucketPath)
-			bucketPutBytesResponse.ErrorCode = 4
-			util.WriteMessageToWriter(w, bucketPutBytesResponse)
 			return err
 		}
 		numBytesToRead -= int64(bytesRead)
