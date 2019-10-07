@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"math/rand"
@@ -17,7 +18,6 @@ import (
 
 type ServerConfiguration struct {
 	ListenAddrAndPort     string
-	SslEnabled            bool
 	SslClientCertFilePath string
 	SslClientKeyFilePath  string
 	BucketPath            string
@@ -125,6 +125,15 @@ func bucketNameToString(bucketName [util.BucketNameLength]byte) string {
 
 func (s *Server) StartAndServe() error {
 	var err error
+
+	if stat, err := os.Stat(s.config.BucketPath); err != nil || !stat.IsDir() {
+		if err != nil {
+			return errors.Wrapf(err, "invalid bucket path")
+		}
+		fmt.Errorf("bucket path: %s is not a directory", s.config.BucketPath)
+		os.Exit(1)
+	}
+
 	s.theListener, err = net.Listen("tcp", s.config.ListenAddrAndPort)
 	if err != nil {
 		return errors.Wrapf(err, "failed to start listener on %s", s.config.ListenAddrAndPort)

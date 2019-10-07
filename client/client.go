@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/genesis32/loft/util"
 	"github.com/pkg/errors"
@@ -18,7 +19,6 @@ import (
 
 type ClientConfiguration struct {
 	ServerAddrAndPort     string
-	SslEnabled            bool
 	SslClientCertFilePath string
 }
 
@@ -76,7 +76,7 @@ func readMessageFromServer(reader *bufio.Reader) ([]byte, error) {
 
 func (c *Client) Connect() error {
 	var err error
-	if c.config.SslEnabled {
+	if len(strings.TrimSpace(c.config.SslClientCertFilePath)) > 0 {
 		rootCert, err := ioutil.ReadFile(c.config.SslClientCertFilePath)
 		if err != nil {
 			return errors.Wrap(err, "Client.Connect failed to ReadFile")

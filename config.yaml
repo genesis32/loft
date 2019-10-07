@@ -1,5 +1,0 @@
-listenPort: ":8089"
-sslEnabled: false
-bucketPath: "/home/ddm/temp/loft-buckets"
-serverKeyPath: "server.key"
-serverCertPath: "server.pem"

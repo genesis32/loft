@@ -9,20 +9,22 @@ import (
 	"github.com/genesis32/loft/server"
 	"github.com/genesis32/loft/util"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
-type configuration struct {
-	SslEnabled     bool
-	ServerKeyPath  string
-	ServerCertPath string
-	BucketPath     string
-	ListenPort     string
-}
+var serverConfig server.ServerConfiguration
+var clientConfig client.ClientConfiguration
 
 func init() {
 
-	BucketCreateCmd.Flags().Int64P("size", "s", 1024*1024, "size of bucket")
+	ServerCmd.Flags().StringVarP(&serverConfig.BucketPath, "bucket-path", "b", "/homedir", "the bucket path")
+	ServerCmd.Flags().StringVarP(&serverConfig.SslClientKeyFilePath, "key", "k", "", "the server private key")
+	ServerCmd.Flags().StringVarP(&serverConfig.SslClientCertFilePath, "cert", "c", "", "the server certificate to present")
+	ServerCmd.Flags().StringVarP(&serverConfig.ListenAddrAndPort, "listen", "l", ":8089", "the port to listen on")
+
+	BucketCmd.PersistentFlags().StringVarP(&clientConfig.ServerAddrAndPort, "server", "s", "localhost:8089", "the server to connect to")
+	BucketCmd.PersistentFlags().StringVarP(&clientConfig.SslClientCertFilePath, "cert", "c", "", "the cert cert to verify")
+
+	BucketCreateCmd.Flags().Int64P("size", "n", 1024*1024, "number of bytes in the bucket")
 
 	BucketDownloadCmd.Flags().StringP("bucket-name", "i", "", "bucket name")
 	BucketDownloadCmd.Flags().StringP("output-file", "o", "", "output file")
@@ -41,25 +43,6 @@ func init() {
 	RootCmd.AddCommand(ServerCmd)
 	RootCmd.AddCommand(VersionCmd)
 	RootCmd.AddCommand(SetCmd)
-}
-
-func loadConfiguration() *configuration {
-	var runtimeConfig configuration
-
-	util.VPrintfOut("Loading configuration\n")
-
-	viper.SetConfigName("config")
-	viper.AddConfigPath(".")
-
-	if err := viper.ReadInConfig(); err != nil {
-		log.Fatalf("Error reading config file, %s", err)
-	}
-
-	if err := viper.Unmarshal(&runtimeConfig); err != nil {
-		log.Fatalf("Unable to decode struct, %s", err)
-	}
-
-	return &runtimeConfig
 }
 
 var RootCmd = &cobra.Command{
@@ -86,16 +69,6 @@ var SetCmd = &cobra.Command{
 var ServerCmd = &cobra.Command{
 	Use: "server",
 	Run: func(cmd *cobra.Command, args []string) {
-
-		runtimeConfig := loadConfiguration()
-
-		serverConfig := server.ServerConfiguration{
-			ListenAddrAndPort:     runtimeConfig.ListenPort,
-			SslEnabled:            runtimeConfig.SslEnabled,
-			SslClientCertFilePath: runtimeConfig.ServerCertPath,
-			SslClientKeyFilePath:  runtimeConfig.ServerKeyPath,
-			BucketPath:            runtimeConfig.BucketPath,
-		}
 		theServer := server.NewServer(serverConfig)
 		err := theServer.StartAndServe()
 		if err != nil {
@@ -114,14 +87,7 @@ var BucketCreateCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		runtimeConfig := loadConfiguration()
-
-		cl := client.ClientConfiguration{
-			ServerAddrAndPort:     "localhost:8089",
-			SslEnabled:            runtimeConfig.SslEnabled,
-			SslClientCertFilePath: runtimeConfig.ServerCertPath,
-		}
-		client := client.NewClient(cl)
+		client := client.NewClient(clientConfig)
 		err := client.Connect()
 		if err != nil {
 			log.Fatal(err)
@@ -167,14 +133,7 @@ var BucketDownloadCmd = &cobra.Command{
 			log.Fatalf("output-file is required")
 		}
 
-		runtimeConfig := loadConfiguration()
-
-		cl := client.ClientConfiguration{
-			ServerAddrAndPort:     "localhost:8089",
-			SslEnabled:            runtimeConfig.SslEnabled,
-			SslClientCertFilePath: runtimeConfig.ServerCertPath,
-		}
-		client := client.NewClient(cl)
+		client := client.NewClient(clientConfig)
 		err := client.Connect()
 
 		err = client.PutBucketInFile(bucketName, outputFile)
@@ -197,14 +156,7 @@ var BucketUploadCmd = &cobra.Command{
 			log.Fatalf("input-file is required")
 		}
 
-		runtimeConfig := loadConfiguration()
-
-		cl := client.ClientConfiguration{
-			ServerAddrAndPort:     "localhost:8089",
-			SslEnabled:            runtimeConfig.SslEnabled,
-			SslClientCertFilePath: runtimeConfig.ServerCertPath,
-		}
-		client := client.NewClient(cl)
+		client := client.NewClient(clientConfig)
 		err := client.Connect()
 
 		_, err = client.PutFileInBucket(bucketName, inputFile)

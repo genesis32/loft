@@ -4,3 +4,4 @@ loft
 **/*.pem
 **/*.key
 **/*.swp
+*.dat*
