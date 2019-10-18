@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/user"
+	"path"
 
 	"github.com/genesis32/loft/client"
 	"github.com/genesis32/loft/server"
@@ -16,13 +18,19 @@ var clientConfig client.ClientConfiguration
 
 func init() {
 
-	ServerCmd.Flags().StringVarP(&serverConfig.BucketPath, "bucket-path", "b", "/homedir", "the bucket path")
+	user, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+	defaultBucketPath := path.Join(user.HomeDir, "loft", "buckets")
+
+	ServerCmd.Flags().StringVarP(&serverConfig.BucketPath, "bucket-path", "b", defaultBucketPath, "the bucket path")
 	ServerCmd.Flags().StringVarP(&serverConfig.SslClientKeyFilePath, "key", "k", "", "the server private key")
 	ServerCmd.Flags().StringVarP(&serverConfig.SslClientCertFilePath, "cert", "c", "", "the server certificate to present")
 	ServerCmd.Flags().StringVarP(&serverConfig.ListenAddrAndPort, "listen", "l", ":8089", "the port to listen on")
 
 	BucketCmd.PersistentFlags().StringVarP(&clientConfig.ServerAddrAndPort, "server", "s", "localhost:8089", "the server to connect to")
-	BucketCmd.PersistentFlags().StringVarP(&clientConfig.SslClientCertFilePath, "cert", "c", "", "the cert cert to verify")
+	BucketCmd.PersistentFlags().StringVarP(&clientConfig.SslClientCertFilePath, "cert", "c", "", "the server cert to auth with")
 
 	BucketCreateCmd.Flags().Int64P("size", "n", 1024*1024, "number of bytes in the bucket")
 
@@ -70,10 +78,7 @@ var ServerCmd = &cobra.Command{
 	Use: "server",
 	Run: func(cmd *cobra.Command, args []string) {
 		theServer := server.NewServer(serverConfig)
-		err := theServer.StartAndServe()
-		if err != nil {
-			log.Fatal(err)
-		}
+		theServer.StartAndServe()
 	},
 }
 
@@ -97,19 +102,6 @@ var BucketCreateCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 		fmt.Printf("created bucket:%s\n", bucketIdentifier)
-
-		/*
-			log.Printf("bucket id: %s", bucketIdentifier)
-			_, err = client.PutFileInBucket(bucketIdentifier, "/Users/dmassey/loft-test-file")
-			if err != nil {
-				log.Fatal(err)
-			}
-			log.Printf("get bytes from bucket")
-			err = client.PutBucketInFile(bucketIdentifier, "/Users/dmassey/loft-test-file-recv")
-			if err != nil {
-				log.Fatal(err)
-			}
-		*/
 	},
 }
 

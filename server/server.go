@@ -3,7 +3,6 @@ package server
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"log"
 	"math/rand"
@@ -38,7 +37,7 @@ type Server struct {
 }
 
 type LoftServer interface {
-	StartAndServe() error
+	StartAndServe()
 	bucketGenerate2(request util.BucketGenerateRequest) (util.BucketGenerateResponse, error)
 	bucketGetBytes2(w *bufio.Writer, request util.BucketGetBytesRequest) error
 	bucketPutBytes2(r io.Reader, w *bufio.Writer, request util.BucketPutBytesRequest) error
@@ -123,20 +122,20 @@ func bucketNameToString(bucketName [util.BucketNameLength]byte) string {
 	return string(bucketName[:])
 }
 
-func (s *Server) StartAndServe() error {
+func (s *Server) StartAndServe() {
 	var err error
 
 	if stat, err := os.Stat(s.config.BucketPath); err != nil || !stat.IsDir() {
 		if err != nil {
-			return errors.Wrapf(err, "invalid bucket path")
+			log.Fatalf("failed to stat bucket path. error: %+v", errors.Wrapf(err, "invalid bucket path"))
 		}
-		fmt.Errorf("bucket path: %s is not a directory", s.config.BucketPath)
-		os.Exit(1)
+		log.Fatalf("bucket path: %s is not a directory", s.config.BucketPath)
 	}
 
+	log.Printf("using bucket path: %s", s.config.BucketPath)
 	s.theListener, err = net.Listen("tcp", s.config.ListenAddrAndPort)
 	if err != nil {
-		return errors.Wrapf(err, "failed to start listener on %s", s.config.ListenAddrAndPort)
+		log.Fatalf("failed to start listener. error: %+v", errors.Wrapf(err, "failed to start listener on %s", s.config.ListenAddrAndPort))
 	}
 	defer s.theListener.Close()
 
@@ -150,7 +149,6 @@ func (s *Server) StartAndServe() error {
 		clientConnection := newServerConnection(conn)
 		go handleServerRequest2(s, clientConnection)
 	}
-	return nil
 }
 
 func (s *Server) bucketGenerate2(request util.BucketGenerateRequest) (util.BucketGenerateResponse, error) {
